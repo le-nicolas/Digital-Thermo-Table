@@ -2,7 +2,9 @@
 
 ThermoLookup is a thermodynamic property interpolation tool for mechanical engineering students.
 
-This version is rebuilt to use your bundled workbook data directly. Users do **not** upload any file.
+
+<img width="1872" height="888" alt="Screenshot 2026-02-24 210313" src="https://github.com/user-attachments/assets/b95361d4-d773-408e-94cc-a34a26faf4a7" />
+
 
 ## What it does
 
