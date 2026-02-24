@@ -6,6 +6,9 @@ ThermoLookup is a thermodynamic property interpolation tool for mechanical engin
 <img width="1872" height="888" alt="Screenshot 2026-02-24 210313" src="https://github.com/user-attachments/assets/b95361d4-d773-408e-94cc-a34a26faf4a7" />
 
 
+<img width="1228" height="910" alt="Screenshot 2026-02-24 212419" src="https://github.com/user-attachments/assets/781b4251-ff5a-4106-8303-1a8a20d2eab6" />
+
+
 ## What it does
 
 - Loads normalized tables from `data/thermo_tables.json`
