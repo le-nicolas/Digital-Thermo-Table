@@ -56,6 +56,20 @@ const CYCLE_TEMPLATES = [
   { id: "steam-loop", label: "Simple Steam Loop", type: "rankine" },
 ];
 
+const WORKFLOW_TYPES = [
+  { id: "phase-check", label: "Phase Determination" },
+  { id: "two-phase", label: "Two-Phase Mixture" },
+  { id: "isentropic-device", label: "Isentropic Turbine / Compressor" },
+  { id: "property-delta", label: "Property Differences" },
+];
+
+const QUALITY_PROPERTY_MAP = {
+  h: { f: "hf", fg: "hfg", g: "hg", label: "enthalpy" },
+  s: { f: "sf", fg: "sfg", g: "sg", label: "entropy" },
+  u: { f: "uf", fg: "ufg", g: "ug", label: "internal energy" },
+  v: { f: "vf", fg: "vfg", g: "vg", label: "specific volume" },
+};
+
 const state = {
   dataset: null,
   tables: [],
@@ -64,6 +78,9 @@ const state = {
   queryHistory: [],
   querySeq: 1,
   activeTab: "lookup",
+  workflow: {
+    type: "phase-check",
+  },
   cycle: {
     diagram: "Ts",
     templateId: "rankine-ideal",
@@ -92,6 +109,17 @@ const el = {
   statusText: document.getElementById("statusText"),
   resultGrid: document.getElementById("resultGrid"),
   stepsList: document.getElementById("stepsList"),
+
+  workflowTypeSelect: document.getElementById("workflowTypeSelect"),
+  workflowFluidSelect: document.getElementById("workflowFluidSelect"),
+  workflowUnitSelect: document.getElementById("workflowUnitSelect"),
+  workflowForm: document.getElementById("workflowForm"),
+  workflowFields: document.getElementById("workflowFields"),
+  workflowValidationMessage: document.getElementById("workflowValidationMessage"),
+  workflowBtn: document.getElementById("workflowBtn"),
+  workflowStatus: document.getElementById("workflowStatus"),
+  workflowResultGrid: document.getElementById("workflowResultGrid"),
+  workflowStepsList: document.getElementById("workflowStepsList"),
 
   statTotalQueries: document.getElementById("statTotalQueries"),
   statMostUsedFluid: document.getElementById("statMostUsedFluid"),
@@ -153,6 +181,10 @@ function safeRatio(numerator, denominator) {
   return numerator / denominator;
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function setStatus(message, kind = "") {
   el.statusText.textContent = message;
   el.statusText.className = "status";
@@ -174,6 +206,22 @@ function setCycleStatus(message, kind = "") {
   el.cycleStatus.className = "status";
   if (kind) {
     el.cycleStatus.classList.add(kind);
+  }
+}
+
+function setWorkflowStatus(message, kind = "") {
+  el.workflowStatus.textContent = message;
+  el.workflowStatus.className = "status";
+  if (kind) {
+    el.workflowStatus.classList.add(kind);
+  }
+}
+
+function setWorkflowValidationMessage(message, kind = "") {
+  el.workflowValidationMessage.textContent = message;
+  el.workflowValidationMessage.className = "validation-msg";
+  if (kind) {
+    el.workflowValidationMessage.classList.add(kind);
   }
 }
 
@@ -656,6 +704,107 @@ function interpolateTable(table, inputs, optionalProps = null) {
   return interpolate1D(table.rows, indexKey, inputs[indexKey], props);
 }
 
+function valueRangeForRows(rows, key) {
+  const values = rows.map((row) => row[key]).filter(Number.isFinite).sort((a, b) => a - b);
+  if (values.length < 2) {
+    return null;
+  }
+  return { min: values[0], max: values[values.length - 1] };
+}
+
+function interpolatePTByProperty(table, pInput, lookupKey, lookupValue, optionalProps = null) {
+  const props = optionalProps || sortedProperties(table.properties);
+  const groups = buildPressureGroups(table.rows);
+
+  if (groups.length < 2) {
+    throw new Error("Table needs at least two pressure groups for reverse lookup.");
+  }
+
+  const pMin = groups[0].pressure;
+  const pMax = groups[groups.length - 1].pressure;
+  if (pInput < pMin || pInput > pMax) {
+    throw new Error(`P = ${formatNumber(pInput)} is outside ${formatNumber(pMin)} to ${formatNumber(pMax)}.`);
+  }
+
+  const supportsLookup = (group) => {
+    const range = valueRangeForRows(group.rows, lookupKey);
+    return range && range.min <= lookupValue && lookupValue <= range.max;
+  };
+
+  const exact = groups.find((group) => Math.abs(group.pressure - pInput) < 1e-9);
+  if (exact && supportsLookup(exact)) {
+    const oneD = interpolate1D(exact.rows, lookupKey, lookupValue, props);
+    return {
+      values: oneD.values,
+      steps: [`Exact pressure match at P = ${formatNumber(exact.pressure)}.`].concat(oneD.steps),
+      meta: {
+        method: oneD.meta.interpolationStages > 0 ? `linear-1d-at-exact-P-using-${lookupKey}` : "exact",
+        interpolationStages: oneD.meta.interpolationStages,
+      },
+    };
+  }
+
+  const lowerGroups = groups.filter((group) => group.pressure <= pInput && supportsLookup(group));
+  const upperGroups = groups.filter((group) => group.pressure >= pInput && supportsLookup(group));
+
+  let lower = null;
+  let upper = null;
+  let bestSpan = Number.POSITIVE_INFINITY;
+
+  for (const low of lowerGroups) {
+    for (const high of upperGroups) {
+      if (low.pressure === high.pressure) {
+        continue;
+      }
+      if (!(low.pressure <= pInput && pInput <= high.pressure)) {
+        continue;
+      }
+      const span = high.pressure - low.pressure;
+      if (span < bestSpan) {
+        bestSpan = span;
+        lower = low;
+        upper = high;
+      }
+    }
+  }
+
+  if (!lower || !upper) {
+    const validP = groups.filter((group) => supportsLookup(group)).map((group) => group.pressure);
+    if (validP.length === 0) {
+      throw new Error(`${lookupKey} = ${formatNumber(lookupValue)} is not available in any pressure slice for this table.`);
+    }
+    throw new Error(
+      `At ${lookupKey}=${formatNumber(lookupValue)}, valid P is ${formatNumber(validP[0])} to ${formatNumber(validP[validP.length - 1])}.`,
+    );
+  }
+
+  const lowInterp = interpolate1D(lower.rows, lookupKey, lookupValue, props);
+  const highInterp = interpolate1D(upper.rows, lookupKey, lookupValue, props);
+  const beta = (pInput - lower.pressure) / (upper.pressure - lower.pressure);
+  const values = {};
+  const steps = [
+    `Pressure bracket: ${formatNumber(lower.pressure)} to ${formatNumber(upper.pressure)}.`,
+    `Interpolate on ${lookupKey} at P = ${formatNumber(lower.pressure)}.`,
+    `Interpolate on ${lookupKey} at P = ${formatNumber(upper.pressure)}.`,
+    `beta = (${formatNumber(pInput)} - ${formatNumber(lower.pressure)}) / (${formatNumber(upper.pressure)} - ${formatNumber(lower.pressure)}) = ${formatNumber(beta)}.`,
+  ];
+
+  for (const prop of props) {
+    const v1 = lowInterp.values[prop];
+    const v2 = highInterp.values[prop];
+    if (Number.isFinite(v1) && Number.isFinite(v2)) {
+      values[prop] = v1 + beta * (v2 - v1);
+      steps.push(`${prop}: ${formatNumber(values[prop])}`);
+    }
+  }
+
+  return {
+    values,
+    steps,
+    meta: { method: `double-interpolation-P${lookupKey}`, interpolationStages: 2 },
+  };
+}
+
 function validateLookupInputs({ showStatus = false } = {}) {
   const table = getSelectedTable();
   if (!table) {
@@ -934,6 +1083,717 @@ function handleLookupSubmit(event) {
     setStatus(error.message, "error");
     renderSteps([error.message]);
   }
+}
+
+function workflowTypeLabel(workflowType) {
+  return WORKFLOW_TYPES.find((entry) => entry.id === workflowType)?.label || workflowType;
+}
+
+function workflowRequiredModes(workflowType) {
+  if (workflowType === "phase-check" || workflowType === "two-phase") {
+    return ["sat-T"];
+  }
+  return ["PT"];
+}
+
+function workflowFluidsForType(workflowType) {
+  const modes = workflowRequiredModes(workflowType);
+  const fluids = new Set();
+  for (const table of state.tables) {
+    if (modes.includes(table.mode)) {
+      fluids.add(table.fluid);
+    }
+  }
+  return [...fluids].sort((a, b) => a.localeCompare(b));
+}
+
+function findWorkflowTable({ mode, fluid, unitSystem }) {
+  const fluidRegex = new RegExp(`^${escapeRegex(fluid)}$`, "i");
+  return findBestTable({ mode, fluidRegex, unitSystem });
+}
+
+function getWorkflowSatTable(fluid, unitSystem) {
+  return findWorkflowTable({ mode: "sat-T", fluid, unitSystem });
+}
+
+function getWorkflowPtTable(fluid, unitSystem) {
+  return findWorkflowTable({ mode: "PT", fluid, unitSystem });
+}
+
+function clearWorkflowResults() {
+  el.workflowResultGrid.innerHTML = "";
+  el.workflowStepsList.innerHTML = "";
+}
+
+function renderWorkflowSteps(stepLines) {
+  el.workflowStepsList.innerHTML = "";
+  for (const line of stepLines) {
+    const li = document.createElement("li");
+    li.textContent = line;
+    el.workflowStepsList.appendChild(li);
+  }
+}
+
+function formatWorkflowCardValue(item) {
+  const numeric = item && Number.isFinite(item.value);
+  if (!numeric) {
+    return item && item.value !== null && item.value !== undefined ? String(item.value) : "-";
+  }
+  return item.unit ? `${formatNumber(item.value)} ${item.unit}` : formatNumber(item.value);
+}
+
+function renderWorkflowResults(items, steps) {
+  clearWorkflowResults();
+
+  for (const item of items) {
+    const card = document.createElement("article");
+    card.className = "result-card";
+
+    const prop = document.createElement("p");
+    prop.className = "prop";
+    prop.textContent = item.label;
+
+    const value = document.createElement("p");
+    value.className = "value";
+    value.textContent = formatWorkflowCardValue(item);
+
+    const desc = document.createElement("p");
+    desc.className = "desc";
+    desc.textContent = item.desc || "";
+
+    card.appendChild(prop);
+    card.appendChild(value);
+    card.appendChild(desc);
+    el.workflowResultGrid.appendChild(card);
+  }
+
+  renderWorkflowSteps(steps);
+}
+
+function parseWorkflowNumberInput(fieldId, label, required = true) {
+  const input = document.getElementById(fieldId);
+  if (!input) {
+    throw new Error(`Missing workflow field: ${label}.`);
+  }
+
+  const raw = input.value.trim();
+  if (!raw) {
+    if (!required) {
+      return null;
+    }
+    throw new Error(`${label} is required.`);
+  }
+
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error(`${label} must be numeric.`);
+  }
+  return value;
+}
+
+function qualityRegionFromX(x) {
+  if (!Number.isFinite(x)) {
+    return "Unknown";
+  }
+  if (x < 0) {
+    return "Compressed liquid side (x < 0)";
+  }
+  if (x > 1) {
+    return "Superheated vapor side (x > 1)";
+  }
+  if (Math.abs(x) < 1e-9) {
+    return "Saturated liquid (x = 0)";
+  }
+  if (Math.abs(x - 1) < 1e-9) {
+    return "Saturated vapor (x = 1)";
+  }
+  return "Saturated mixture (0 < x < 1)";
+}
+
+function solvePhaseCheckWorkflow({ fluid, unitSystem, T, P, qualityProperty, qualityValue }) {
+  const satTable = getWorkflowSatTable(fluid, unitSystem);
+  if (!satTable) {
+    throw new Error(`No saturated table found for ${fluid} (${unitSystem}).`);
+  }
+
+  const satProps = ["P", "vf", "vfg", "vg", "uf", "ufg", "ug", "hf", "hfg", "hg", "sf", "sfg", "sg"];
+  const satLookup = interpolate1D(satTable.rows, "T", T, satProps);
+  const sat = satLookup.values;
+
+  if (!Number.isFinite(sat.P)) {
+    throw new Error("Saturation pressure was not found at the selected temperature.");
+  }
+
+  const pSat = sat.P;
+  const deltaP = P - pSat;
+  const deltaPct = safeRatio(deltaP, pSat);
+  const tolerance = Math.max(1e-4, Math.abs(pSat) * 0.01);
+  let region = "Saturated mixture region";
+
+  if (P > pSat + tolerance) {
+    region = "Compressed liquid (subcooled)";
+  } else if (P < pSat - tolerance) {
+    region = "Superheated vapor";
+  }
+
+  const steps = [];
+  steps.push(`From saturated table at T=${formatNumber(T)}, Psat=${formatNumber(pSat)}.`);
+  steps.push(`Compare given P=${formatNumber(P)} against Psat with tolerance ${formatNumber(tolerance)}.`);
+  steps.push(`Phase decision: ${region}.`);
+
+  let quality = null;
+  if (qualityProperty !== "none") {
+    const map = QUALITY_PROPERTY_MAP[qualityProperty];
+    if (!map) {
+      throw new Error("Unsupported quality property selected.");
+    }
+    if (!Number.isFinite(qualityValue)) {
+      throw new Error(`Enter a ${map.label} value to compute quality.`);
+    }
+    if (!Number.isFinite(sat[map.f]) || !Number.isFinite(sat[map.fg]) || Math.abs(sat[map.fg]) < 1e-12) {
+      throw new Error(`Could not compute quality from ${qualityProperty}; saturation data is incomplete.`);
+    }
+    quality = (qualityValue - sat[map.f]) / sat[map.fg];
+    steps.push(
+      `Quality from ${qualityProperty}: x = (${formatNumber(qualityValue)} - ${formatNumber(sat[map.f])}) / ${formatNumber(sat[map.fg])} = ${formatNumber(quality)}.`,
+    );
+    steps.push(`Quality interpretation: ${qualityRegionFromX(quality)}.`);
+  }
+
+  const items = [
+    { label: "Phase Region", value: region, desc: "From P vs Psat(T)" },
+    { label: "Psat at T", value: pSat, desc: "Saturation pressure", unit: satTable.inputs.P?.unit || "" },
+    { label: "Delta P", value: deltaP, desc: "P - Psat" },
+    { label: "Delta P %", value: Number.isFinite(deltaPct) ? deltaPct * 100 : null, desc: "Relative pressure offset", unit: "%" },
+  ];
+
+  if (Number.isFinite(quality)) {
+    items.push({ label: "Quality x", value: quality, desc: qualityRegionFromX(quality) });
+
+    for (const [baseProp, map] of Object.entries(QUALITY_PROPERTY_MAP)) {
+      if (Number.isFinite(sat[map.f]) && Number.isFinite(sat[map.fg])) {
+        items.push({
+          label: `${baseProp} (from x)`,
+          value: sat[map.f] + quality * sat[map.fg],
+          desc: `${map.f} + x*${map.fg}`,
+        });
+      }
+    }
+  }
+
+  return {
+    items,
+    steps,
+    status: `Phase workflow solved for ${fluid}.`,
+  };
+}
+
+function solveTwoPhaseWorkflow({ fluid, unitSystem, basis, basisValue, qualityMode, xInput, qualityProperty, qualityPropertyValue }) {
+  const satTable = getWorkflowSatTable(fluid, unitSystem);
+  if (!satTable) {
+    throw new Error(`No saturated table found for ${fluid} (${unitSystem}).`);
+  }
+
+  const satProps = ["T", "P", "vf", "vfg", "vg", "uf", "ufg", "ug", "hf", "hfg", "hg", "sf", "sfg", "sg"];
+  const satLookup = interpolate1D(satTable.rows, basis, basisValue, satProps);
+  const sat = satLookup.values;
+  const steps = [];
+  steps.push(`Saturation lookup using ${basis}=${formatNumber(basisValue)}.`);
+  steps.push(`Resolved state: Tsat=${formatNumber(sat.T)}, Psat=${formatNumber(sat.P)}.`);
+
+  let quality = null;
+  if (qualityMode === "given-x") {
+    if (!Number.isFinite(xInput)) {
+      throw new Error("Quality x is required when quality mode is 'given x'.");
+    }
+    quality = xInput;
+    steps.push(`Using provided quality x=${formatNumber(quality)}.`);
+  } else {
+    const map = QUALITY_PROPERTY_MAP[qualityProperty];
+    if (!map) {
+      throw new Error("Select a valid property to compute quality.");
+    }
+    if (!Number.isFinite(qualityPropertyValue)) {
+      throw new Error(`Enter a ${map.label} value to compute quality.`);
+    }
+    if (!Number.isFinite(sat[map.f]) || !Number.isFinite(sat[map.fg]) || Math.abs(sat[map.fg]) < 1e-12) {
+      throw new Error(`Could not compute quality from ${qualityProperty}; saturation data is incomplete.`);
+    }
+    quality = (qualityPropertyValue - sat[map.f]) / sat[map.fg];
+    steps.push(
+      `Computed quality from ${qualityProperty}: x = (${formatNumber(qualityPropertyValue)} - ${formatNumber(sat[map.f])}) / ${formatNumber(sat[map.fg])} = ${formatNumber(quality)}.`,
+    );
+  }
+
+  const items = [
+    { label: "Tsat", value: sat.T, desc: "Saturation temperature" },
+    { label: "Psat", value: sat.P, desc: "Saturation pressure" },
+    { label: "Quality x", value: quality, desc: qualityRegionFromX(quality) },
+    { label: "Region", value: qualityRegionFromX(quality), desc: "From quality" },
+  ];
+
+  for (const [baseProp, map] of Object.entries(QUALITY_PROPERTY_MAP)) {
+    if (Number.isFinite(sat[map.f]) && Number.isFinite(sat[map.fg])) {
+      items.push({
+        label: baseProp,
+        value: sat[map.f] + quality * sat[map.fg],
+        desc: `${map.f} + x*${map.fg}`,
+      });
+      steps.push(`${baseProp} = ${map.f} + x*${map.fg}.`);
+    }
+  }
+
+  return {
+    items,
+    steps,
+    status: `Two-phase workflow solved for ${fluid}.`,
+  };
+}
+
+function solveIsentropicDeviceWorkflow({ fluid, unitSystem, device, P1, T1, P2, eta }) {
+  const ptTable = getWorkflowPtTable(fluid, unitSystem);
+  if (!ptTable) {
+    throw new Error(`No PT table found for ${fluid} (${unitSystem}).`);
+  }
+  if (!Number.isFinite(eta) || eta <= 0) {
+    throw new Error("Isentropic efficiency must be a positive value.");
+  }
+
+  const inlet = interpolatePT(ptTable, T1, P1, ["T", "P", "h", "s", "u", "v"]);
+  const h1 = inlet.values.h;
+  const s1 = inlet.values.s;
+  if (!Number.isFinite(h1) || !Number.isFinite(s1)) {
+    throw new Error("Inlet h and s could not be resolved at state 1.");
+  }
+
+  const isentropicExit = interpolatePTByProperty(ptTable, P2, "s", s1, ["T", "P", "h", "s", "u", "v"]);
+  const h2s = isentropicExit.values.h;
+  if (!Number.isFinite(h2s)) {
+    throw new Error("Could not resolve isentropic exit enthalpy h2s.");
+  }
+
+  let h2 = null;
+  let specificWorkIsentropic = null;
+  let specificWorkActual = null;
+  const isTurbine = device === "turbine";
+
+  if (isTurbine) {
+    specificWorkIsentropic = h1 - h2s;
+    h2 = h1 - eta * specificWorkIsentropic;
+    specificWorkActual = h1 - h2;
+  } else {
+    specificWorkIsentropic = h2s - h1;
+    h2 = h1 + specificWorkIsentropic / eta;
+    specificWorkActual = h2 - h1;
+  }
+
+  const steps = [];
+  steps.push(`State 1 from PT lookup at T1=${formatNumber(T1)}, P1=${formatNumber(P1)} -> h1=${formatNumber(h1)}, s1=${formatNumber(s1)}.`);
+  steps.push(`Isentropic condition: s2s = s1 = ${formatNumber(s1)} at P2=${formatNumber(P2)}.`);
+  steps.push(`Resolved h2s=${formatNumber(h2s)} from reverse lookup (P + s).`);
+  if (isTurbine) {
+    steps.push(`Turbine efficiency: eta_t = (h1-h2)/(h1-h2s), so h2 = h1 - eta_t*(h1-h2s).`);
+  } else {
+    steps.push(`Compressor efficiency: eta_c = (h2s-h1)/(h2-h1), so h2 = h1 + (h2s-h1)/eta_c.`);
+  }
+  steps.push(`Computed actual exit enthalpy h2=${formatNumber(h2)}.`);
+
+  let actualExit = null;
+  let actualExitNote = null;
+  try {
+    actualExit = interpolatePTByProperty(ptTable, P2, "h", h2, ["T", "P", "h", "s", "u", "v"]).values;
+    steps.push(`Recovered actual exit state from reverse lookup (P + h).`);
+  } catch (error) {
+    actualExitNote = `Actual exit T/s not recovered from table range: ${error.message}`;
+    steps.push(actualExitNote);
+  }
+
+  const items = [
+    { label: "h1", value: h1, desc: "Inlet enthalpy" },
+    { label: "s1", value: s1, desc: "Inlet entropy" },
+    { label: "h2s", value: h2s, desc: "Isentropic exit enthalpy" },
+    { label: "h2", value: h2, desc: "Actual exit enthalpy" },
+    { label: "w_is", value: specificWorkIsentropic, desc: "Isentropic specific work" },
+    { label: "w_actual", value: specificWorkActual, desc: "Actual specific work" },
+    { label: "eta_is", value: eta, desc: "Input isentropic efficiency" },
+  ];
+
+  if (actualExit && Number.isFinite(actualExit.T)) {
+    items.push({ label: "T2 actual", value: actualExit.T, desc: "Recovered from P + h lookup" });
+  }
+  if (actualExit && Number.isFinite(actualExit.s)) {
+    items.push({ label: "s2 actual", value: actualExit.s, desc: "Recovered from P + h lookup" });
+  }
+  if (actualExitNote) {
+    items.push({ label: "State note", value: actualExitNote, desc: "Range warning" });
+  }
+
+  return {
+    items,
+    steps,
+    status: `Isentropic ${isTurbine ? "turbine" : "compressor"} workflow solved for ${fluid}.`,
+  };
+}
+
+function solvePropertyDeltaWorkflow({ fluid, unitSystem, T1, P1, T2, P2 }) {
+  const ptTable = getWorkflowPtTable(fluid, unitSystem);
+  if (!ptTable) {
+    throw new Error(`No PT table found for ${fluid} (${unitSystem}).`);
+  }
+
+  const st1 = interpolatePT(ptTable, T1, P1, ["T", "P", "h", "s", "u", "v"]).values;
+  const st2 = interpolatePT(ptTable, T2, P2, ["T", "P", "h", "s", "u", "v"]).values;
+
+  const delta = {
+    h: Number.isFinite(st2.h) && Number.isFinite(st1.h) ? st2.h - st1.h : null,
+    s: Number.isFinite(st2.s) && Number.isFinite(st1.s) ? st2.s - st1.s : null,
+    u: Number.isFinite(st2.u) && Number.isFinite(st1.u) ? st2.u - st1.u : null,
+    v: Number.isFinite(st2.v) && Number.isFinite(st1.v) ? st2.v - st1.v : null,
+  };
+
+  const steps = [];
+  steps.push(`State 1 lookup at T1=${formatNumber(T1)}, P1=${formatNumber(P1)}.`);
+  steps.push(`State 2 lookup at T2=${formatNumber(T2)}, P2=${formatNumber(P2)}.`);
+  steps.push("Compute deltas with Delta(property) = property_2 - property_1.");
+
+  const items = [
+    { label: "h1", value: st1.h, desc: "State 1 enthalpy" },
+    { label: "h2", value: st2.h, desc: "State 2 enthalpy" },
+    { label: "Delta h", value: delta.h, desc: "h2 - h1" },
+    { label: "Delta s", value: delta.s, desc: "s2 - s1" },
+    { label: "Delta u", value: delta.u, desc: "u2 - u1" },
+    { label: "Delta v", value: delta.v, desc: "v2 - v1" },
+  ];
+
+  return {
+    items,
+    steps,
+    status: `Property-change workflow solved for ${fluid}.`,
+  };
+}
+
+function workflowReferenceTable(workflowType, fluid, unitSystem) {
+  if (!fluid || !unitSystem) {
+    return null;
+  }
+  if (workflowType === "phase-check" || workflowType === "two-phase") {
+    return getWorkflowSatTable(fluid, unitSystem);
+  }
+  return getWorkflowPtTable(fluid, unitSystem);
+}
+
+function populateWorkflowTypeSelect() {
+  const current = state.workflow.type;
+  el.workflowTypeSelect.innerHTML = "";
+  for (const workflow of WORKFLOW_TYPES) {
+    const option = document.createElement("option");
+    option.value = workflow.id;
+    option.textContent = workflow.label;
+    el.workflowTypeSelect.appendChild(option);
+  }
+  el.workflowTypeSelect.value = WORKFLOW_TYPES.some((item) => item.id === current) ? current : WORKFLOW_TYPES[0].id;
+  state.workflow.type = el.workflowTypeSelect.value;
+}
+
+function populateWorkflowFluidSelect(preserveFluid = null) {
+  const fluids = workflowFluidsForType(state.workflow.type);
+  el.workflowFluidSelect.innerHTML = "";
+
+  if (fluids.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No compatible fluid";
+    el.workflowFluidSelect.appendChild(option);
+    el.workflowFluidSelect.value = "";
+    return;
+  }
+
+  for (const fluid of fluids) {
+    const option = document.createElement("option");
+    option.value = fluid;
+    option.textContent = fluid;
+    el.workflowFluidSelect.appendChild(option);
+  }
+
+  const canPreserve = preserveFluid && fluids.includes(preserveFluid);
+  el.workflowFluidSelect.value = canPreserve ? preserveFluid : fluids[0];
+}
+
+function populateWorkflowUnitSelect(preserveUnit = null) {
+  const fluid = el.workflowFluidSelect.value;
+  const modes = workflowRequiredModes(state.workflow.type);
+  el.workflowUnitSelect.innerHTML = "";
+
+  if (!fluid) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No compatible units";
+    el.workflowUnitSelect.appendChild(option);
+    el.workflowUnitSelect.value = "";
+    return;
+  }
+
+  const units = [...new Set(state.tables.filter((table) => table.fluid === fluid && modes.includes(table.mode)).map((table) => table.unit_system))]
+    .sort((a, b) => a.localeCompare(b));
+
+  if (units.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No compatible units";
+    el.workflowUnitSelect.appendChild(option);
+    el.workflowUnitSelect.value = "";
+    return;
+  }
+
+  for (const unit of units) {
+    const option = document.createElement("option");
+    option.value = unit;
+    option.textContent = unit;
+    el.workflowUnitSelect.appendChild(option);
+  }
+
+  const canPreserve = preserveUnit && units.includes(preserveUnit);
+  el.workflowUnitSelect.value = canPreserve ? preserveUnit : units[0];
+}
+
+function renderWorkflowFields() {
+  const fluid = el.workflowFluidSelect.value;
+  const unitSystem = el.workflowUnitSelect.value;
+  const table = workflowReferenceTable(state.workflow.type, fluid, unitSystem);
+
+  if (!table) {
+    el.workflowFields.innerHTML = '<p class="validation-msg warn">No compatible table for this fluid/unit workflow combination.</p>';
+    el.workflowBtn.disabled = true;
+    setWorkflowValidationMessage("Select a fluid and unit system with compatible tables.", "warn");
+    return;
+  }
+
+  el.workflowBtn.disabled = false;
+  const tRange = table.inputs.T;
+  const pRangeInput = table.inputs.P;
+  const pRangeRows = valueRangeForRows(table.rows, "P");
+  const pRange = pRangeInput || pRangeRows;
+  const tRangeText = tRange ? `${formatNumber(tRange.min)} to ${formatNumber(tRange.max)}` : "table range";
+  const pRangeText = pRange ? `${formatNumber(pRange.min)} to ${formatNumber(pRange.max)}` : "table range";
+
+  if (state.workflow.type === "phase-check") {
+    el.workflowFields.innerHTML = `
+      <div class="query-field">
+        <label for="wfPhaseT">Temperature T (${tRangeText})</label>
+        <input id="wfPhaseT" type="number" step="any" placeholder="Known T" />
+      </div>
+      <div class="query-field">
+        <label for="wfPhaseP">Pressure P (${pRangeText})</label>
+        <input id="wfPhaseP" type="number" step="any" placeholder="Known P" />
+      </div>
+      <div class="query-field">
+        <label for="wfPhaseQualityProp">Optional quality property</label>
+        <select id="wfPhaseQualityProp">
+          <option value="none">No quality calculation</option>
+          <option value="h">h-based quality</option>
+          <option value="s">s-based quality</option>
+          <option value="u">u-based quality</option>
+          <option value="v">v-based quality</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfPhaseQualityValue">Optional property value</label>
+        <input id="wfPhaseQualityValue" type="number" step="any" placeholder="Value used for x" />
+      </div>
+    `;
+    setWorkflowValidationMessage("Provide T and P to classify phase. Optional property can estimate quality x.");
+    return;
+  }
+
+  if (state.workflow.type === "two-phase") {
+    el.workflowFields.innerHTML = `
+      <div class="query-field">
+        <label for="wfTwoPhaseBasis">Saturation basis</label>
+        <select id="wfTwoPhaseBasis">
+          <option value="T">Known T</option>
+          <option value="P">Known P</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfTwoPhaseBasisValue">Saturation value (T or P)</label>
+        <input id="wfTwoPhaseBasisValue" type="number" step="any" placeholder="Known T or P" />
+      </div>
+      <div class="query-field">
+        <label for="wfTwoPhaseQualityMode">Quality input mode</label>
+        <select id="wfTwoPhaseQualityMode">
+          <option value="given-x">Given quality x</option>
+          <option value="from-property">Compute x from property</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfTwoPhaseX">Quality x (if given)</label>
+        <input id="wfTwoPhaseX" type="number" step="any" placeholder="0 to 1" />
+      </div>
+      <div class="query-field">
+        <label for="wfTwoPhaseQualityProp">Property for x (if computed)</label>
+        <select id="wfTwoPhaseQualityProp">
+          <option value="h">h</option>
+          <option value="s">s</option>
+          <option value="u">u</option>
+          <option value="v">v</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfTwoPhaseQualityValue">Property value (if computed)</label>
+        <input id="wfTwoPhaseQualityValue" type="number" step="any" placeholder="Known h, s, u, or v" />
+      </div>
+    `;
+    setWorkflowValidationMessage("Use given x or compute x from a known two-phase property.");
+    return;
+  }
+
+  if (state.workflow.type === "isentropic-device") {
+    el.workflowFields.innerHTML = `
+      <div class="query-field">
+        <label for="wfIsoDevice">Device</label>
+        <select id="wfIsoDevice">
+          <option value="turbine">Turbine</option>
+          <option value="compressor">Compressor</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfIsoP1">Inlet pressure P1 (${pRangeText})</label>
+        <input id="wfIsoP1" type="number" step="any" placeholder="P1" />
+      </div>
+      <div class="query-field">
+        <label for="wfIsoT1">Inlet temperature T1 (${tRangeText})</label>
+        <input id="wfIsoT1" type="number" step="any" placeholder="T1" />
+      </div>
+      <div class="query-field">
+        <label for="wfIsoP2">Exit pressure P2 (${pRangeText})</label>
+        <input id="wfIsoP2" type="number" step="any" placeholder="P2" />
+      </div>
+      <div class="query-field">
+        <label for="wfIsoEta">Isentropic efficiency eta (default 1.0)</label>
+        <input id="wfIsoEta" type="number" step="any" placeholder="e.g. 0.85" />
+      </div>
+    `;
+    setWorkflowValidationMessage("Solve s1 = s2s first, then apply device efficiency to get actual exit state.");
+    return;
+  }
+
+  el.workflowFields.innerHTML = `
+    <div class="query-field">
+      <label for="wfDeltaP1">State 1 pressure P1 (${pRangeText})</label>
+      <input id="wfDeltaP1" type="number" step="any" placeholder="P1" />
+    </div>
+    <div class="query-field">
+      <label for="wfDeltaT1">State 1 temperature T1 (${tRangeText})</label>
+      <input id="wfDeltaT1" type="number" step="any" placeholder="T1" />
+    </div>
+    <div class="query-field">
+      <label for="wfDeltaP2">State 2 pressure P2 (${pRangeText})</label>
+      <input id="wfDeltaP2" type="number" step="any" placeholder="P2" />
+    </div>
+    <div class="query-field">
+      <label for="wfDeltaT2">State 2 temperature T2 (${tRangeText})</label>
+      <input id="wfDeltaT2" type="number" step="any" placeholder="T2" />
+    </div>
+  `;
+  setWorkflowValidationMessage("Compute delta values directly from two PT states.");
+}
+
+function refreshWorkflowControls({ preserveFluid = null, preserveUnit = null } = {}) {
+  populateWorkflowFluidSelect(preserveFluid);
+  populateWorkflowUnitSelect(preserveUnit);
+  renderWorkflowFields();
+}
+
+function handleWorkflowSubmit(event) {
+  event.preventDefault();
+  const workflowType = state.workflow.type;
+  const fluid = el.workflowFluidSelect.value;
+  const unitSystem = el.workflowUnitSelect.value;
+
+  if (!fluid || !unitSystem) {
+    setWorkflowValidationMessage("Select a compatible fluid and unit system first.", "error");
+    setWorkflowStatus("Workflow cannot run without a valid fluid/unit selection.", "error");
+    return;
+  }
+
+  try {
+    let solved = null;
+
+    if (workflowType === "phase-check") {
+      const T = parseWorkflowNumberInput("wfPhaseT", "Temperature T");
+      const P = parseWorkflowNumberInput("wfPhaseP", "Pressure P");
+      const qualityProperty = document.getElementById("wfPhaseQualityProp").value;
+      const qualityValue = parseWorkflowNumberInput("wfPhaseQualityValue", "Quality property value", false);
+      solved = solvePhaseCheckWorkflow({ fluid, unitSystem, T, P, qualityProperty, qualityValue });
+    } else if (workflowType === "two-phase") {
+      const basis = document.getElementById("wfTwoPhaseBasis").value;
+      const basisValue = parseWorkflowNumberInput("wfTwoPhaseBasisValue", `${basis} value`);
+      const qualityMode = document.getElementById("wfTwoPhaseQualityMode").value;
+      const xInput = parseWorkflowNumberInput("wfTwoPhaseX", "Quality x", false);
+      const qualityProperty = document.getElementById("wfTwoPhaseQualityProp").value;
+      const qualityPropertyValue = parseWorkflowNumberInput("wfTwoPhaseQualityValue", "Quality property value", false);
+      solved = solveTwoPhaseWorkflow({
+        fluid,
+        unitSystem,
+        basis,
+        basisValue,
+        qualityMode,
+        xInput,
+        qualityProperty,
+        qualityPropertyValue,
+      });
+    } else if (workflowType === "isentropic-device") {
+      const device = document.getElementById("wfIsoDevice").value;
+      const P1 = parseWorkflowNumberInput("wfIsoP1", "Inlet pressure P1");
+      const T1 = parseWorkflowNumberInput("wfIsoT1", "Inlet temperature T1");
+      const P2 = parseWorkflowNumberInput("wfIsoP2", "Exit pressure P2");
+      const etaInput = parseWorkflowNumberInput("wfIsoEta", "Isentropic efficiency", false);
+      const eta = Number.isFinite(etaInput) ? etaInput : 1;
+      solved = solveIsentropicDeviceWorkflow({ fluid, unitSystem, device, P1, T1, P2, eta });
+    } else {
+      const P1 = parseWorkflowNumberInput("wfDeltaP1", "State 1 pressure P1");
+      const T1 = parseWorkflowNumberInput("wfDeltaT1", "State 1 temperature T1");
+      const P2 = parseWorkflowNumberInput("wfDeltaP2", "State 2 pressure P2");
+      const T2 = parseWorkflowNumberInput("wfDeltaT2", "State 2 temperature T2");
+      solved = solvePropertyDeltaWorkflow({ fluid, unitSystem, T1, P1, T2, P2 });
+    }
+
+    renderWorkflowResults(solved.items, solved.steps);
+    setWorkflowValidationMessage(`${workflowTypeLabel(workflowType)} solved.`);
+    setWorkflowStatus(solved.status || "Workflow solved.", "ok");
+  } catch (error) {
+    clearWorkflowResults();
+    setWorkflowValidationMessage(error.message, "error");
+    setWorkflowStatus(error.message, "error");
+    renderWorkflowSteps([error.message]);
+  }
+}
+
+function wireWorkflowEvents() {
+  el.workflowTypeSelect.addEventListener("change", () => {
+    const previousFluid = el.workflowFluidSelect.value;
+    const previousUnit = el.workflowUnitSelect.value;
+    state.workflow.type = el.workflowTypeSelect.value;
+    refreshWorkflowControls({ preserveFluid: previousFluid, preserveUnit: previousUnit });
+    clearWorkflowResults();
+    setWorkflowStatus(`Workflow ready: ${workflowTypeLabel(state.workflow.type)}.`);
+  });
+
+  el.workflowFluidSelect.addEventListener("change", () => {
+    const previousUnit = el.workflowUnitSelect.value;
+    populateWorkflowUnitSelect(previousUnit);
+    renderWorkflowFields();
+    clearWorkflowResults();
+    setWorkflowStatus(`Workflow ready: ${workflowTypeLabel(state.workflow.type)}.`);
+  });
+
+  el.workflowUnitSelect.addEventListener("change", () => {
+    renderWorkflowFields();
+    clearWorkflowResults();
+    setWorkflowStatus(`Workflow ready: ${workflowTypeLabel(state.workflow.type)}.`);
+  });
+
+  el.workflowForm.addEventListener("submit", handleWorkflowSubmit);
 }
 function findBestTable({ mode = null, fluidRegex = null, unitSystem = "SI", sheetRegex = null }) {
   let candidates = state.tables.filter((table) => {
@@ -1677,6 +2537,11 @@ async function loadDataset() {
     populateFluidFilter();
     applyTableFilters();
 
+    populateWorkflowTypeSelect();
+    refreshWorkflowControls();
+    clearWorkflowResults();
+    setWorkflowStatus(`Workflow ready: ${workflowTypeLabel(state.workflow.type)}.`);
+
     populateCycleTemplateSelect();
     loadCycleTemplate(state.cycle.templateId);
 
@@ -1691,6 +2556,7 @@ async function loadDataset() {
       `Could not load dataset. Run from a local server (for example: python -m http.server 8080). ${error.message}`,
       "error",
     );
+    setWorkflowStatus("Workflow panel unavailable until dataset is loaded.", "error");
     setCycleStatus("Cycle plotter unavailable until dataset is loaded.", "error");
   } finally {
     setLookupLoading(false);
@@ -1700,6 +2566,7 @@ async function loadDataset() {
 function init() {
   wireTabs();
   wireLookupEvents();
+  wireWorkflowEvents();
   wireCycleEvents();
 
   el.modeFilter.value = "all";

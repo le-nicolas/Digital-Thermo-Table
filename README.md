@@ -12,10 +12,15 @@ ThermoLookup is a thermodynamic property interpolation tool for mechanical engin
 ## What it does
 
 - Loads normalized tables from `data/thermo_tables.json`
-- Supports:
+- Supports table-driven lookup:
   - Saturated tables by temperature (`sat-T`)
   - Saturated tables by pressure (`sat-P`)
   - 2D tables by temperature + pressure (`PT`)
+- Supports workflow solvers (new):
+  - `Phase Determination` from `T` and `P` using saturation checks
+  - `Two-Phase Mixture` using quality `x` (or back-calculating `x` from a known property)
+  - `Isentropic Turbine / Compressor` with reverse lookup (`P + s`) and efficiency correction
+  - `Property Differences` (`Delta h`, `Delta s`, `Delta u`, `Delta v`) between two states
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app
 

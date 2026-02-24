@@ -21,7 +21,7 @@
         <p class="eyebrow">Mechanical Engineering Utility</p>
         <h1>ThermoLookup</h1>
         <p class="subtitle">
-          Property lookup, interpolation history, compare mode, and thermodynamic cycle plotting from your bundled dataset.
+          Workflow-driven thermodynamics solving, property lookup history, compare mode, and cycle plotting from your bundled dataset.
         </p>
       </div>
       <div class="dataset-pill" id="datasetMeta">Loading dataset...</div>
@@ -29,6 +29,7 @@
 
     <nav class="tabs" aria-label="Main tabs">
       <button class="tab-btn active" data-tab="lookup">Property Lookup</button>
+      <button class="tab-btn" data-tab="workflow">Problem Workflows</button>
       <button class="tab-btn" data-tab="history">Query History</button>
       <button class="tab-btn" data-tab="compare">Compare</button>
       <button class="tab-btn" data-tab="cycle">Cycle Plotter</button>
@@ -76,6 +77,47 @@
             <details class="steps" open>
               <summary>Calculation steps</summary>
               <ol id="stepsList"></ol>
+            </details>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-workflow">
+        <div class="workflow-layout">
+          <section class="panel controls">
+            <h2>Problem Type Solver</h2>
+
+            <label for="workflowTypeSelect">Problem type</label>
+            <select id="workflowTypeSelect">
+              <option value="phase-check">Phase Determination</option>
+              <option value="two-phase">Two-Phase Mixture</option>
+              <option value="isentropic-device">Isentropic Turbine / Compressor</option>
+              <option value="property-delta">Property Differences</option>
+            </select>
+
+            <label for="workflowFluidSelect">Fluid</label>
+            <select id="workflowFluidSelect"></select>
+
+            <label for="workflowUnitSelect">Unit system</label>
+            <select id="workflowUnitSelect"></select>
+
+            <form id="workflowForm" class="query-form">
+              <h3>Inputs</h3>
+              <div id="workflowFields"></div>
+              <p class="validation-msg" id="workflowValidationMessage"></p>
+              <button type="submit" id="workflowBtn">Solve Workflow</button>
+            </form>
+          </section>
+
+          <section class="panel results">
+            <h2>Workflow Results</h2>
+            <p class="status" id="workflowStatus">Select a workflow and enter known values.</p>
+
+            <div class="result-grid" id="workflowResultGrid"></div>
+
+            <details class="steps" open>
+              <summary>Computation steps</summary>
+              <ol id="workflowStepsList"></ol>
             </details>
           </section>
         </div>
