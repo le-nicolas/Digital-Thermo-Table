@@ -324,13 +324,37 @@ function interpolate1D(rows, key, target, props) {
   return { values, steps };
 }
 
+function buildPressureGroups(rows) {
+  const groupsByPressure = new Map();
+  rows.forEach((row) => {
+    if (!Number.isFinite(row.P) || !Number.isFinite(row.T)) {
+      return;
+    }
+    if (!groupsByPressure.has(row.P)) {
+      groupsByPressure.set(row.P, []);
+    }
+    groupsByPressure.get(row.P).push(row);
+  });
+
+  return [...groupsByPressure.entries()]
+    .map(([pressure, groupRows]) => {
+      const sorted = [...groupRows].sort((a, b) => a.T - b.T);
+      return {
+        pressure,
+        rows: sorted,
+        tMin: sorted[0].T,
+        tMax: sorted[sorted.length - 1].T,
+      };
+    })
+    .sort((a, b) => a.pressure - b.pressure);
+}
+
 function interpolatePT(table, tInput, pInput) {
   const props = sortedProperties(table.properties);
-  const pressureValues = [...new Set(table.rows.map((row) => row.P))]
-    .filter((value) => Number.isFinite(value))
-    .sort((a, b) => a - b);
+  const groups = buildPressureGroups(table.rows);
+  const pressureValues = groups.map((group) => group.pressure);
 
-  if (pressureValues.length < 2) {
+  if (groups.length < 2) {
     throw new Error("Table needs at least two pressure levels for 2D interpolation.");
   }
 
@@ -340,42 +364,66 @@ function interpolatePT(table, tInput, pInput) {
     throw new Error(`P = ${pInput} is outside range ${formatNumber(pMin)} to ${formatNumber(pMax)}.`);
   }
 
-  const exactPressure = pressureValues.find((p) => Math.abs(p - pInput) < 1e-9);
+  const exactGroup = groups.find((group) => Math.abs(group.pressure - pInput) < 1e-9);
   const steps = [];
 
-  if (Number.isFinite(exactPressure)) {
-    const subset = table.rows.filter((row) => Math.abs(row.P - exactPressure) < 1e-9);
-    const oneD = interpolate1D(subset, "T", tInput, props);
-    steps.push(`Exact pressure match at P = ${formatNumber(exactPressure)}. Interpolating on T only.`);
+  const supportsT = (group) => group.tMin <= tInput && tInput <= group.tMax;
+
+  if (exactGroup && supportsT(exactGroup)) {
+    const oneD = interpolate1D(exactGroup.rows, "T", tInput, props);
+    steps.push(`Exact pressure match at P = ${formatNumber(exactGroup.pressure)}. Interpolating on T only.`);
     steps.push(...oneD.steps);
     return { values: oneD.values, steps };
   }
 
-  let p1 = null;
-  let p2 = null;
-  for (let i = 0; i < pressureValues.length - 1; i += 1) {
-    if (pressureValues[i] <= pInput && pInput <= pressureValues[i + 1]) {
-      p1 = pressureValues[i];
-      p2 = pressureValues[i + 1];
-      break;
+  const lowerGroups = groups.filter((group) => group.pressure <= pInput && supportsT(group));
+  const upperGroups = groups.filter((group) => group.pressure >= pInput && supportsT(group));
+
+  let lower = null;
+  let upper = null;
+  let bestSpan = Number.POSITIVE_INFINITY;
+  lowerGroups.forEach((low) => {
+    upperGroups.forEach((high) => {
+      if (low.pressure === high.pressure) {
+        return;
+      }
+      if (!(low.pressure <= pInput && pInput <= high.pressure)) {
+        return;
+      }
+      const span = high.pressure - low.pressure;
+      if (span < bestSpan) {
+        bestSpan = span;
+        lower = low;
+        upper = high;
+      }
+    });
+  });
+
+  if (!lower || !upper) {
+    const validAtT = groups.filter((group) => supportsT(group)).map((group) => group.pressure);
+    if (validAtT.length === 0) {
+      const tGlobalMin = Math.min(...groups.map((group) => group.tMin));
+      const tGlobalMax = Math.max(...groups.map((group) => group.tMax));
+      throw new Error(
+        `T = ${formatNumber(tInput)} is outside available T slices. Use T between ${formatNumber(tGlobalMin)} and ${formatNumber(tGlobalMax)}.`,
+      );
     }
+    throw new Error(
+      `At T = ${formatNumber(tInput)}, valid pressure range is ${formatNumber(validAtT[0])} to ${formatNumber(validAtT[validAtT.length - 1])}.`,
+    );
   }
 
-  if (!Number.isFinite(p1) || !Number.isFinite(p2)) {
-    throw new Error(`Unable to find pressure bracket for P = ${pInput}.`);
-  }
+  const first = interpolate1D(lower.rows, "T", tInput, props);
+  const second = interpolate1D(upper.rows, "T", tInput, props);
 
-  const rowsAtP1 = table.rows.filter((row) => Math.abs(row.P - p1) < 1e-9);
-  const rowsAtP2 = table.rows.filter((row) => Math.abs(row.P - p2) < 1e-9);
-  const first = interpolate1D(rowsAtP1, "T", tInput, props);
-  const second = interpolate1D(rowsAtP2, "T", tInput, props);
-
-  const beta = (pInput - p1) / (p2 - p1);
+  const beta = (pInput - lower.pressure) / (upper.pressure - lower.pressure);
   const values = {};
-  steps.push(`Pressure bracket: ${formatNumber(p1)} to ${formatNumber(p2)}.`);
-  steps.push(`At P = ${formatNumber(p1)}: ${first.steps[0]}`);
-  steps.push(`At P = ${formatNumber(p2)}: ${second.steps[0]}`);
-  steps.push(`Pressure factor beta = (${formatNumber(pInput)} - ${formatNumber(p1)}) / (${formatNumber(p2)} - ${formatNumber(p1)}) = ${formatNumber(beta)}.`);
+  steps.push(`Pressure bracket: ${formatNumber(lower.pressure)} to ${formatNumber(upper.pressure)}.`);
+  steps.push(`At P = ${formatNumber(lower.pressure)}: ${first.steps[0]}`);
+  steps.push(`At P = ${formatNumber(upper.pressure)}: ${second.steps[0]}`);
+  steps.push(
+    `Pressure factor beta = (${formatNumber(pInput)} - ${formatNumber(lower.pressure)}) / (${formatNumber(upper.pressure)} - ${formatNumber(lower.pressure)}) = ${formatNumber(beta)}.`,
+  );
 
   props.forEach((prop) => {
     const y1 = first.values[prop];

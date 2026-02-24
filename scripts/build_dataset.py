@@ -28,6 +28,7 @@ SATURATION_PROPS = [
     "sg",
 ]
 GRID_PROPS = ["v", "u", "h", "s"]
+ALL_PROP_KEYS = set(SATURATION_PROPS + GRID_PROPS + ["T", "P"])
 
 
 def clean_text(value: Any) -> str:
@@ -126,6 +127,11 @@ def map_property(header_text: str) -> Optional[str]:
     raw = header_text.lower()
     norm = normalize_text(raw)
 
+    token_hits = re.findall(r"\(\s*([a-z0-9]+)\s*\)", raw)
+    for token in token_hits:
+        if token in ALL_PROP_KEYS:
+            return token
+
     # Saturated-table property columns (more specific first).
     if re.search(r"\bvfg\b|\(\s*vfg\s*\)|evap(oration)?\s*\(\s*vfg\s*\)", raw):
         return "vfg"
@@ -138,7 +144,7 @@ def map_property(header_text: str) -> Optional[str]:
 
     if re.search(r"\bvf\b|\(\s*vf\s*\)|sat(\.|urated)?\s*(liquid|solid).*\(\s*vf\s*\)", raw):
         return "vf"
-    if re.search(r"\bvg\b|\(\s*vg\s*\)|sat(\.|urated)?\s*vap(or)?", raw) and "vfg" not in raw:
+    if re.search(r"\bvg\b|\(\s*vg\s*\)", raw):
         return "vg"
     if re.search(r"\buf\b|\(\s*uf\s*\)|sat(\.|urated)?\s*(liquid|solid).*\(\s*uf\s*\)", raw):
         return "uf"
@@ -230,6 +236,7 @@ def iter_sheet_rows(ws: Any) -> List[List[Any]]:
 
 def extract_records(rows: List[List[Any]], mapped: Dict[str, int], mode: str, header_idx: int) -> List[Dict[str, float]]:
     records: List[Dict[str, float]] = []
+    last_index_values: Dict[str, float] = {}
 
     for row in rows[header_idx + 1 :]:
         parsed: Dict[str, float] = {}
@@ -239,6 +246,20 @@ def extract_records(rows: List[List[Any]], mapped: Dict[str, int], mode: str, he
             number = to_number(row[col_idx])
             if number is not None:
                 parsed[key] = number
+
+        index_keys: List[str]
+        if mode == "PT":
+            index_keys = ["P"]
+        elif mode == "sat-T":
+            index_keys = ["T"]
+        else:
+            index_keys = ["P"]
+
+        for idx_key in index_keys:
+            if idx_key in parsed:
+                last_index_values[idx_key] = parsed[idx_key]
+            elif idx_key in last_index_values:
+                parsed[idx_key] = last_index_values[idx_key]
 
         if mode == "PT":
             if "T" not in parsed or "P" not in parsed:
