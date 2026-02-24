@@ -97,6 +97,52 @@ const CYCLE_INPUT_SCHEMAS = {
   ],
 };
 
+const CYCLE_TARGET_METRICS = {
+  "rankine-ideal": [
+    { key: "wnet", label: "Net work", unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", unit: "-" },
+    { key: "wt", label: "Turbine work", unit: "kJ/kg" },
+    { key: "wp", label: "Pump work", unit: "kJ/kg" },
+    { key: "qin", label: "Heat input", unit: "kJ/kg" },
+    { key: "qout", label: "Heat rejected", unit: "kJ/kg" },
+    { key: "bwr", label: "Back work ratio", unit: "-" },
+    { key: "x4", label: "Turbine exit quality", unit: "-" },
+  ],
+  "rankine-reheat": [
+    { key: "wnet", label: "Net work", unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", unit: "-" },
+    { key: "wt", label: "Turbine work", unit: "kJ/kg" },
+    { key: "wp", label: "Pump work", unit: "kJ/kg" },
+    { key: "qin", label: "Heat input", unit: "kJ/kg" },
+    { key: "qout", label: "Heat rejected", unit: "kJ/kg" },
+    { key: "bwr", label: "Back work ratio", unit: "-" },
+    { key: "x6", label: "LP turbine exit quality", unit: "-" },
+  ],
+  vcr: [
+    { key: "cop", label: "COP", unit: "-" },
+    { key: "qL", label: "Refrigerating effect", unit: "kJ/kg" },
+    { key: "wcomp", label: "Compressor work", unit: "kJ/kg" },
+    { key: "qH", label: "Heat rejected", unit: "kJ/kg" },
+    { key: "x4", label: "Valve exit quality", unit: "-" },
+  ],
+  brayton: [
+    { key: "wnet", label: "Net work", unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", unit: "-" },
+    { key: "wt", label: "Turbine work", unit: "kJ/kg" },
+    { key: "wcomp", label: "Compressor work", unit: "kJ/kg" },
+    { key: "pressure_ratio", label: "Pressure ratio", unit: "-" },
+  ],
+  "steam-loop": [
+    { key: "wnet", label: "Net specific work", unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", unit: "-" },
+    { key: "wt", label: "Turbine-side work", unit: "kJ/kg" },
+    { key: "wp", label: "Pump-side work", unit: "kJ/kg" },
+    { key: "qin", label: "Heat input", unit: "kJ/kg" },
+    { key: "qout", label: "Heat rejected", unit: "kJ/kg" },
+    { key: "x4", label: "Expansion exit quality", unit: "-" },
+  ],
+};
+
 const WORKFLOW_TYPES = [
   { id: "phase-check", label: "Phase Determination" },
   { id: "two-phase", label: "Two-Phase Mixture" },
@@ -128,9 +174,11 @@ const state = {
     diagram: "Ts",
     templateId: "rankine-ideal",
     templateInputs: {},
+    inverseInputs: {},
     templatePoints: [],
     manualPoints: [],
     metrics: [],
+    warnings: [],
     workingFluid: null,
     domeVisible: true,
     isobarsVisible: false,
@@ -179,6 +227,14 @@ const el = {
   cycleInputFields: document.getElementById("cycleInputFields"),
   cycleInputMessage: document.getElementById("cycleInputMessage"),
   solveCycleBtn: document.getElementById("solveCycleBtn"),
+  cycleInverseForm: document.getElementById("cycleInverseForm"),
+  cycleUnknownSelect: document.getElementById("cycleUnknownSelect"),
+  cycleTargetMetricSelect: document.getElementById("cycleTargetMetricSelect"),
+  cycleTargetValue: document.getElementById("cycleTargetValue"),
+  cycleSolveMin: document.getElementById("cycleSolveMin"),
+  cycleSolveMax: document.getElementById("cycleSolveMax"),
+  cycleInverseMessage: document.getElementById("cycleInverseMessage"),
+  solveUnknownBtn: document.getElementById("solveUnknownBtn"),
   toggleDome: document.getElementById("toggleDome"),
   toggleIsobars: document.getElementById("toggleIsobars"),
   manualLabel: document.getElementById("manualLabel"),
@@ -191,6 +247,7 @@ const el = {
   cycleStatus: document.getElementById("cycleStatus"),
   cycleCanvas: document.getElementById("cycleCanvas"),
   cycleMetrics: document.getElementById("cycleMetrics"),
+  cycleWarnings: document.getElementById("cycleWarnings"),
   cyclePointsBody: document.getElementById("cyclePointsBody"),
 };
 
@@ -266,6 +323,17 @@ function setCycleInputMessage(message, kind = "") {
   el.cycleInputMessage.className = "validation-msg";
   if (kind) {
     el.cycleInputMessage.classList.add(kind);
+  }
+}
+
+function setCycleInverseMessage(message, kind = "") {
+  if (!el.cycleInverseMessage) {
+    return;
+  }
+  el.cycleInverseMessage.textContent = message;
+  el.cycleInverseMessage.className = "validation-msg";
+  if (kind) {
+    el.cycleInverseMessage.classList.add(kind);
   }
 }
 
@@ -2297,6 +2365,10 @@ function cycleInputSchema(templateId) {
   return CYCLE_INPUT_SCHEMAS[templateId] || [];
 }
 
+function cycleMetricSchema(templateId) {
+  return CYCLE_TARGET_METRICS[templateId] || [];
+}
+
 function defaultCycleInputs(templateId) {
   const defaults = {};
   for (const field of cycleInputSchema(templateId)) {
@@ -2328,6 +2400,25 @@ function mergeCycleInputs(templateId, inputOverride = null) {
   return merged;
 }
 
+function defaultCycleInverseInputs(templateId) {
+  const fields = cycleInputSchema(templateId);
+  const metrics = cycleMetricSchema(templateId);
+  return {
+    unknownKey: fields[0]?.key || "",
+    targetKey: metrics[0]?.key || "",
+    targetValue: "",
+    min: "",
+    max: "",
+  };
+}
+
+function cycleInverseInputsForTemplate(templateId) {
+  if (!state.cycle.inverseInputs[templateId]) {
+    state.cycle.inverseInputs[templateId] = defaultCycleInverseInputs(templateId);
+  }
+  return state.cycle.inverseInputs[templateId];
+}
+
 function readCycleInputsFromForm(templateId) {
   const inputs = {};
   for (const field of cycleInputSchema(templateId)) {
@@ -2346,6 +2437,41 @@ function readCycleInputsFromForm(templateId) {
     inputs[field.key] = value;
   }
   return inputs;
+}
+
+function readCycleInputsFromFormExcluding(templateId, unknownKey) {
+  const inputs = {};
+  for (const field of cycleInputSchema(templateId)) {
+    if (field.key === unknownKey) {
+      continue;
+    }
+    const input = document.getElementById(`cycleInput_${field.key}`);
+    if (!input) {
+      continue;
+    }
+    const raw = input.value.trim();
+    if (!raw) {
+      throw new Error(`${field.label} is required.`);
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new Error(`${field.label} must be numeric.`);
+    }
+    inputs[field.key] = value;
+  }
+  return inputs;
+}
+
+function parseOptionalCycleNumber(valueText, label) {
+  const raw = String(valueText || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error(`${label} must be numeric.`);
+  }
+  return value;
 }
 
 function renderCycleInputFields(templateId) {
@@ -2373,6 +2499,61 @@ function renderCycleInputFields(templateId) {
   }
 
   setCycleInputMessage("Update inputs and click Solve Cycle.");
+}
+
+function renderCycleInverseControls(templateId) {
+  if (!el.cycleUnknownSelect || !el.cycleTargetMetricSelect) {
+    return;
+  }
+
+  const fields = cycleInputSchema(templateId);
+  const metrics = cycleMetricSchema(templateId);
+  const config = cycleInverseInputsForTemplate(templateId);
+
+  if (!fields.some((field) => field.key === config.unknownKey)) {
+    config.unknownKey = fields[0]?.key || "";
+  }
+  if (!metrics.some((metric) => metric.key === config.targetKey)) {
+    config.targetKey = metrics[0]?.key || "";
+  }
+
+  el.cycleUnknownSelect.innerHTML = "";
+  for (const field of fields) {
+    const option = document.createElement("option");
+    option.value = field.key;
+    option.textContent = field.label;
+    el.cycleUnknownSelect.appendChild(option);
+  }
+
+  el.cycleTargetMetricSelect.innerHTML = "";
+  for (const metric of metrics) {
+    const suffix = metric.unit && metric.unit !== "-" ? ` [${metric.unit}]` : "";
+    const option = document.createElement("option");
+    option.value = metric.key;
+    option.textContent = `${metric.label}${suffix}`;
+    el.cycleTargetMetricSelect.appendChild(option);
+  }
+
+  const validConfig = fields.length > 0 && metrics.length > 0;
+  el.cycleUnknownSelect.disabled = !validConfig;
+  el.cycleTargetMetricSelect.disabled = !validConfig;
+  el.cycleTargetValue.disabled = !validConfig;
+  el.cycleSolveMin.disabled = !validConfig;
+  el.cycleSolveMax.disabled = !validConfig;
+  el.solveUnknownBtn.disabled = !validConfig;
+
+  if (!validConfig) {
+    setCycleInverseMessage("Unknown solver is unavailable for this template.", "warn");
+    return;
+  }
+
+  el.cycleUnknownSelect.value = config.unknownKey;
+  el.cycleTargetMetricSelect.value = config.targetKey;
+  el.cycleTargetValue.value = Number.isFinite(config.targetValue) ? String(config.targetValue) : "";
+  el.cycleSolveMin.value = Number.isFinite(config.min) ? String(config.min) : "";
+  el.cycleSolveMax.value = Number.isFinite(config.max) ? String(config.max) : "";
+
+  setCycleInverseMessage("Choose one unknown input and target metric, then click Solve Unknown.");
 }
 
 function satStateAtPressure(table, pressure, props) {
@@ -2519,6 +2700,222 @@ function solveIsentropicWaterStateAtPressure(satPWater, superWater, pressure, en
   return solveStateAtPressureAndEntropyWithSat(satPWater, superWater, pressure, entropyTarget);
 }
 
+function metricValueByKey(metrics, key) {
+  const entry = metrics.find((metric) => metric.key === key);
+  return entry && Number.isFinite(entry.value) ? entry.value : null;
+}
+
+function cycleSanityWarnings(templateId, points, metrics) {
+  const warnings = [];
+
+  for (const point of points) {
+    if (Number.isFinite(point.x) && (point.x < 0 || point.x > 1)) {
+      warnings.push(`Point ${point.point}: quality x=${formatNumber(point.x)} is outside 0..1.`);
+    }
+  }
+
+  const eta = metricValueByKey(metrics, "eta_th");
+  if (Number.isFinite(eta) && (eta <= 0 || eta >= 1.2)) {
+    warnings.push(`Thermal efficiency ${formatNumber(eta)} looks outside a typical range.`);
+  }
+
+  if (templateId === "rankine-ideal" || templateId === "rankine-reheat" || templateId === "steam-loop") {
+    const wt = metricValueByKey(metrics, "wt");
+    const wp = metricValueByKey(metrics, "wp");
+    if (Number.isFinite(wt) && wt <= 0) {
+      warnings.push("Turbine-side work is non-positive; check pressures/temperatures.");
+    }
+    if (Number.isFinite(wp) && wp <= 0) {
+      warnings.push("Pump work is non-positive; check P_high and P_low inputs.");
+    }
+  }
+
+  if (templateId === "vcr") {
+    const cop = metricValueByKey(metrics, "cop");
+    const wcomp = metricValueByKey(metrics, "wcomp");
+    if (Number.isFinite(wcomp) && wcomp <= 0) {
+      warnings.push("Compressor work is non-positive; this is physically unlikely for standard VCR operation.");
+    }
+    if (Number.isFinite(cop) && cop <= 0) {
+      warnings.push("COP is non-positive; check state points and pressures.");
+    }
+    if (points.length >= 2 && Number.isFinite(points[1].s) && Number.isFinite(points[0].s) && points[1].s < points[0].s) {
+      warnings.push("Compressor outlet entropy is lower than inlet entropy; verify compressor model assumptions.");
+    }
+  }
+
+  if (templateId === "brayton") {
+    const pressureRatio = metricValueByKey(metrics, "pressure_ratio");
+    if (Number.isFinite(pressureRatio) && pressureRatio <= 1) {
+      warnings.push("Pressure ratio should be greater than 1 for a Brayton compressor stage.");
+    }
+    const wnet = metricValueByKey(metrics, "wnet");
+    if (Number.isFinite(wnet) && wnet <= 0) {
+      warnings.push("Net work is non-positive; cycle may be operating as a net consumer, not a power cycle.");
+    }
+    if (points.length >= 2 && Number.isFinite(points[1].s) && Number.isFinite(points[0].s) && points[1].s < points[0].s) {
+      warnings.push("Compressor outlet entropy is lower than inlet entropy; check data range and assumptions.");
+    }
+  }
+
+  return warnings;
+}
+
+function defaultSearchBoundsForUnknown(templateId, unknownKey, knownInputs, minOverride = null, maxOverride = null) {
+  if (Number.isFinite(minOverride) && Number.isFinite(maxOverride) && minOverride >= maxOverride) {
+    throw new Error("Search max must be greater than search min.");
+  }
+
+  const defaults = defaultCycleInputs(templateId);
+  const baseline = firstFinite(knownInputs[unknownKey], defaults[unknownKey], 1);
+
+  let minAuto = null;
+  let maxAuto = null;
+  if (/^eta/i.test(unknownKey)) {
+    minAuto = 0.2;
+    maxAuto = 1.2;
+  } else if (/^p/i.test(unknownKey)) {
+    const ref = Math.max(Math.abs(baseline), 1);
+    minAuto = Math.max(1e-6, ref * 0.2);
+    maxAuto = ref * 8;
+  } else if (/^t/i.test(unknownKey)) {
+    const ref = Math.max(Math.abs(baseline), 1);
+    minAuto = baseline - Math.max(120, ref * 0.5);
+    maxAuto = baseline + Math.max(220, ref * 1.2);
+  } else {
+    const ref = Math.max(Math.abs(baseline), 1);
+    minAuto = Math.max(1e-6, ref * 0.2);
+    maxAuto = ref * 8;
+  }
+
+  const min = Number.isFinite(minOverride) ? minOverride : minAuto;
+  const max = Number.isFinite(maxOverride) ? maxOverride : maxAuto;
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+    throw new Error("Could not construct a valid search range for the selected unknown.");
+  }
+
+  return { min, max };
+}
+
+function evaluateCycleMetric(templateId, unknownKey, unknownValue, knownInputs, targetKey) {
+  const builder = findTemplateBuilder(templateId);
+  if (!builder) {
+    throw new Error(`Unknown cycle template: ${templateId}.`);
+  }
+
+  const candidateInputs = mergeCycleInputs(templateId, { ...knownInputs, [unknownKey]: unknownValue });
+  let built = null;
+  try {
+    built = builder(candidateInputs);
+  } catch (error) {
+    return null;
+  }
+
+  const metric = built.metrics.find((entry) => entry.key === targetKey);
+  if (!metric || !Number.isFinite(metric.value)) {
+    return null;
+  }
+
+  return {
+    unknownValue,
+    metricValue: metric.value,
+    built,
+    inputs: candidateInputs,
+  };
+}
+
+function solveUnknownByTarget(templateId, unknownKey, targetKey, targetValue, knownInputs, minValue, maxValue) {
+  const range = defaultSearchBoundsForUnknown(templateId, unknownKey, knownInputs, minValue, maxValue);
+  const points = [];
+  const sampleCount = 80;
+  const valueTol = Math.max(1e-7, Math.abs(targetValue) * 1e-5);
+
+  for (let i = 0; i <= sampleCount; i += 1) {
+    const x = range.min + (i / sampleCount) * (range.max - range.min);
+    const evaluation = evaluateCycleMetric(templateId, unknownKey, x, knownInputs, targetKey);
+    if (!evaluation) {
+      continue;
+    }
+    const residual = evaluation.metricValue - targetValue;
+    points.push({ ...evaluation, residual });
+    if (Math.abs(residual) <= valueTol) {
+      return { ...evaluation, residual, iterations: i, bracketed: false };
+    }
+  }
+
+  if (points.length < 2) {
+    throw new Error("Could not evaluate enough valid states in the search range. Adjust bounds.");
+  }
+
+  let left = null;
+  let right = null;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (a.residual === 0) {
+      return { ...a, iterations: i, bracketed: true };
+    }
+    if (a.residual * b.residual < 0) {
+      left = a;
+      right = b;
+      break;
+    }
+  }
+
+  if (!left || !right) {
+    const closest = points.reduce((best, point) =>
+      !best || Math.abs(point.residual) < Math.abs(best.residual) ? point : best,
+    null);
+    throw new Error(
+      `Target metric could not be bracketed in [${formatNumber(range.min)}, ${formatNumber(range.max)}]. Closest residual: ${formatNumber(closest.residual)}.`,
+    );
+  }
+
+  let best = Math.abs(left.residual) <= Math.abs(right.residual) ? left : right;
+  let iteration = 0;
+  const maxIterations = 80;
+
+  while (iteration < maxIterations) {
+    iteration += 1;
+    const midValue = 0.5 * (left.unknownValue + right.unknownValue);
+    let mid = evaluateCycleMetric(templateId, unknownKey, midValue, knownInputs, targetKey);
+
+    if (!mid) {
+      const nearLeftValue = 0.5 * (left.unknownValue + midValue);
+      const nearRightValue = 0.5 * (midValue + right.unknownValue);
+      mid = evaluateCycleMetric(templateId, unknownKey, nearLeftValue, knownInputs, targetKey);
+      if (!mid) {
+        mid = evaluateCycleMetric(templateId, unknownKey, nearRightValue, knownInputs, targetKey);
+      }
+      if (!mid) {
+        break;
+      }
+    }
+
+    mid.residual = mid.metricValue - targetValue;
+    if (Math.abs(mid.residual) < Math.abs(best.residual)) {
+      best = mid;
+    }
+
+    if (Math.abs(mid.residual) <= valueTol) {
+      return { ...mid, iterations: iteration, bracketed: true };
+    }
+
+    if (left.residual * mid.residual <= 0) {
+      right = mid;
+    } else {
+      left = mid;
+    }
+
+    if (Math.abs(right.unknownValue - left.unknownValue) <= 1e-8 * Math.max(1, Math.abs(mid.unknownValue))) {
+      break;
+    }
+  }
+
+  return { ...best, iterations: iteration, bracketed: true };
+}
+
 function buildIdealRankineTemplate(inputOverride = null) {
   const satPWater = findBestTable({ mode: "sat-P", fluidRegex: /water/i, unitSystem: "SI" });
   const superWater = findBestTable({ mode: "PT", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /superheated/i });
@@ -2562,21 +2959,22 @@ function buildIdealRankineTemplate(inputOverride = null) {
   const qout = points[3].h - points[0].h;
 
   const metrics = [
-    { label: "Turbine work", value: wt, unit: "kJ/kg" },
-    { label: "Pump work", value: wp, unit: "kJ/kg" },
-    { label: "Net work", value: wnet, unit: "kJ/kg" },
-    { label: "Heat input", value: qin, unit: "kJ/kg" },
-    { label: "Heat rejected", value: qout, unit: "kJ/kg" },
-    { label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
-    { label: "Back work ratio", value: safeRatio(wp, wt), unit: "-" },
+    { key: "wt", label: "Turbine work", value: wt, unit: "kJ/kg" },
+    { key: "wp", label: "Pump work", value: wp, unit: "kJ/kg" },
+    { key: "wnet", label: "Net work", value: wnet, unit: "kJ/kg" },
+    { key: "qin", label: "Heat input", value: qin, unit: "kJ/kg" },
+    { key: "qout", label: "Heat rejected", value: qout, unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
+    { key: "bwr", label: "Back work ratio", value: safeRatio(wp, wt), unit: "-" },
   ];
   if (Number.isFinite(st4.x)) {
-    metrics.push({ label: "Turbine exit quality", value: st4.x, unit: "-" });
+    metrics.push({ key: "x4", label: "Turbine exit quality", value: st4.x, unit: "-" });
   }
-  metrics.push({ label: "eta_t used", value: etaT, unit: "-" });
-  metrics.push({ label: "eta_p used", value: etaP, unit: "-" });
+  metrics.push({ key: "eta_t", label: "eta_t used", value: etaT, unit: "-" });
+  metrics.push({ key: "eta_p", label: "eta_p used", value: etaP, unit: "-" });
 
-  return { points, metrics, fluid: superWater.fluid || "Water" };
+  const warnings = cycleSanityWarnings("rankine-ideal", points, metrics);
+  return { points, metrics, warnings, fluid: superWater.fluid || "Water" };
 }
 
 function buildRankineReheatTemplate(inputOverride = null) {
@@ -2632,22 +3030,23 @@ function buildRankineReheatTemplate(inputOverride = null) {
   const qout = points[5].h - points[0].h;
 
   const metrics = [
-    { label: "Turbine work", value: wt, unit: "kJ/kg" },
-    { label: "Pump work", value: wp, unit: "kJ/kg" },
-    { label: "Net work", value: wnet, unit: "kJ/kg" },
-    { label: "Heat input", value: qin, unit: "kJ/kg" },
-    { label: "Heat rejected", value: qout, unit: "kJ/kg" },
-    { label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
-    { label: "Back work ratio", value: safeRatio(wp, wt), unit: "-" },
+    { key: "wt", label: "Turbine work", value: wt, unit: "kJ/kg" },
+    { key: "wp", label: "Pump work", value: wp, unit: "kJ/kg" },
+    { key: "wnet", label: "Net work", value: wnet, unit: "kJ/kg" },
+    { key: "qin", label: "Heat input", value: qin, unit: "kJ/kg" },
+    { key: "qout", label: "Heat rejected", value: qout, unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
+    { key: "bwr", label: "Back work ratio", value: safeRatio(wp, wt), unit: "-" },
   ];
   if (Number.isFinite(st6.x)) {
-    metrics.push({ label: "LP turbine exit quality", value: st6.x, unit: "-" });
+    metrics.push({ key: "x6", label: "LP turbine exit quality", value: st6.x, unit: "-" });
   }
-  metrics.push({ label: "eta_t,HP used", value: etaTHP, unit: "-" });
-  metrics.push({ label: "eta_t,LP used", value: etaTLP, unit: "-" });
-  metrics.push({ label: "eta_p used", value: etaP, unit: "-" });
+  metrics.push({ key: "eta_t_hp", label: "eta_t,HP used", value: etaTHP, unit: "-" });
+  metrics.push({ key: "eta_t_lp", label: "eta_t,LP used", value: etaTLP, unit: "-" });
+  metrics.push({ key: "eta_p", label: "eta_p used", value: etaP, unit: "-" });
 
-  return { points, metrics, fluid: superWater.fluid || "Water" };
+  const warnings = cycleSanityWarnings("rankine-reheat", points, metrics);
+  return { points, metrics, warnings, fluid: superWater.fluid || "Water" };
 }
 
 function buildVcrTemplate(inputOverride = null) {
@@ -2702,17 +3101,18 @@ function buildVcrTemplate(inputOverride = null) {
   const heatRejected = points[1].h - points[2].h;
 
   const metrics = [
-    { label: "Compressor work", value: compressorWork, unit: "kJ/kg" },
-    { label: "Refrigerating effect", value: refrigeratingEffect, unit: "kJ/kg" },
-    { label: "Heat rejected", value: heatRejected, unit: "kJ/kg" },
-    { label: "COP", value: safeRatio(refrigeratingEffect, compressorWork), unit: "-" },
-    { label: "eta_c used", value: etaC, unit: "-" },
+    { key: "wcomp", label: "Compressor work", value: compressorWork, unit: "kJ/kg" },
+    { key: "qL", label: "Refrigerating effect", value: refrigeratingEffect, unit: "kJ/kg" },
+    { key: "qH", label: "Heat rejected", value: heatRejected, unit: "kJ/kg" },
+    { key: "cop", label: "COP", value: safeRatio(refrigeratingEffect, compressorWork), unit: "-" },
+    { key: "eta_c", label: "eta_c used", value: etaC, unit: "-" },
   ];
   if (Number.isFinite(quality4)) {
-    metrics.push({ label: "Valve exit quality", value: quality4, unit: "-" });
+    metrics.push({ key: "x4", label: "Valve exit quality", value: quality4, unit: "-" });
   }
 
-  return { points, metrics, fluid: satR.fluid };
+  const warnings = cycleSanityWarnings("vcr", points, metrics);
+  return { points, metrics, warnings, fluid: satR.fluid };
 }
 
 function buildBraytonTemplate(inputOverride = null) {
@@ -2754,16 +3154,17 @@ function buildBraytonTemplate(inputOverride = null) {
   const qIn = points[2].h - points[1].h;
 
   const metrics = [
-    { label: "Compressor work", value: compressorWork, unit: "kJ/kg" },
-    { label: "Turbine work", value: turbineWork, unit: "kJ/kg" },
-    { label: "Net work", value: netWork, unit: "kJ/kg" },
-    { label: "Pressure ratio", value: safeRatio(pHigh, pLow), unit: "-" },
-    { label: "Thermal efficiency", value: safeRatio(netWork, qIn), unit: "-" },
-    { label: "eta_c used", value: etaC, unit: "-" },
-    { label: "eta_t used", value: etaT, unit: "-" },
+    { key: "wcomp", label: "Compressor work", value: compressorWork, unit: "kJ/kg" },
+    { key: "wt", label: "Turbine work", value: turbineWork, unit: "kJ/kg" },
+    { key: "wnet", label: "Net work", value: netWork, unit: "kJ/kg" },
+    { key: "pressure_ratio", label: "Pressure ratio", value: safeRatio(pHigh, pLow), unit: "-" },
+    { key: "eta_th", label: "Thermal efficiency", value: safeRatio(netWork, qIn), unit: "-" },
+    { key: "eta_c", label: "eta_c used", value: etaC, unit: "-" },
+    { key: "eta_t", label: "eta_t used", value: etaT, unit: "-" },
   ];
 
-  return { points, metrics, fluid: nitrogen.fluid };
+  const warnings = cycleSanityWarnings("brayton", points, metrics);
+  return { points, metrics, warnings, fluid: nitrogen.fluid };
 }
 
 function buildSteamLoopTemplate(inputOverride = null) {
@@ -2808,20 +3209,21 @@ function buildSteamLoopTemplate(inputOverride = null) {
   const qout = points[3].h - points[0].h;
 
   const metrics = [
-    { label: "Turbine-side work", value: wt, unit: "kJ/kg" },
-    { label: "Pump-side work", value: wp, unit: "kJ/kg" },
-    { label: "Net specific work", value: wnet, unit: "kJ/kg" },
-    { label: "Heat input", value: qin, unit: "kJ/kg" },
-    { label: "Heat rejected", value: qout, unit: "kJ/kg" },
-    { label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
+    { key: "wt", label: "Turbine-side work", value: wt, unit: "kJ/kg" },
+    { key: "wp", label: "Pump-side work", value: wp, unit: "kJ/kg" },
+    { key: "wnet", label: "Net specific work", value: wnet, unit: "kJ/kg" },
+    { key: "qin", label: "Heat input", value: qin, unit: "kJ/kg" },
+    { key: "qout", label: "Heat rejected", value: qout, unit: "kJ/kg" },
+    { key: "eta_th", label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
   ];
   if (Number.isFinite(st4.x)) {
-    metrics.push({ label: "Expansion exit quality", value: st4.x, unit: "-" });
+    metrics.push({ key: "x4", label: "Expansion exit quality", value: st4.x, unit: "-" });
   }
-  metrics.push({ label: "eta_t used", value: etaT, unit: "-" });
-  metrics.push({ label: "eta_p used", value: etaP, unit: "-" });
+  metrics.push({ key: "eta_t", label: "eta_t used", value: etaT, unit: "-" });
+  metrics.push({ key: "eta_p", label: "eta_p used", value: etaP, unit: "-" });
 
-  return { points, metrics, fluid: superWater.fluid || "Water" };
+  const warnings = cycleSanityWarnings("steam-loop", points, metrics);
+  return { points, metrics, warnings, fluid: superWater.fluid || "Water" };
 }
 function populateCycleTemplateSelect() {
   el.cycleTemplateSelect.innerHTML = "";
@@ -2848,6 +3250,24 @@ function renderCycleMetrics() {
     const suffix = metric.unit && metric.unit !== "-" ? ` ${metric.unit}` : "";
     li.textContent = `${metric.label}: ${formatNumber(metric.value)}${suffix}`;
     el.cycleMetrics.appendChild(li);
+  }
+}
+
+function renderCycleWarnings() {
+  if (!el.cycleWarnings) {
+    return;
+  }
+
+  el.cycleWarnings.innerHTML = "";
+  if (!state.cycle.warnings.length) {
+    el.cycleWarnings.innerHTML = "<li>No warnings.</li>";
+    return;
+  }
+
+  for (const warning of state.cycle.warnings) {
+    const li = document.createElement("li");
+    li.textContent = warning;
+    el.cycleWarnings.appendChild(li);
   }
 }
 
@@ -3010,6 +3430,8 @@ function renderCyclePlot() {
   const domePoints = [...dome.liquid, ...dome.vapor];
   const isobarPoints = isobars.flatMap((curve) => curve.points);
   const allPoints = [...domePoints, ...isobarPoints, ...templateMapped, ...manualMapped];
+  const transformY = (value) => (isPh ? Math.log10(value) : value);
+  const inverseY = (value) => (isPh ? 10 ** value : value);
 
   if (allPoints.length === 0) {
     ctx.fillStyle = "#6b7280";
@@ -3018,11 +3440,36 @@ function renderCyclePlot() {
     return;
   }
 
-  const transformY = (value) => (isPh ? Math.log10(value) : value);
-  const inverseY = (value) => (isPh ? 10 ** value : value);
+  const primaryPoints = [...templateMapped, ...manualMapped];
+  let boundsPoints = primaryPoints.length > 0 ? [...primaryPoints] : [...allPoints];
 
-  const xValues = allPoints.map((p) => p.x).filter(Number.isFinite);
-  const yValues = allPoints.map((p) => p.y).filter(Number.isFinite);
+  if (primaryPoints.length > 0 && domePoints.length > 0) {
+    const px = primaryPoints.map((point) => point.x).filter(Number.isFinite);
+    const py = primaryPoints.map((point) => transformY(point.y)).filter(Number.isFinite);
+    if (px.length > 0 && py.length > 0) {
+      const pxMin = Math.min(...px);
+      const pxMax = Math.max(...px);
+      const pyMin = Math.min(...py);
+      const pyMax = Math.max(...py);
+      const spanX = Math.max(pxMax - pxMin, 1e-9);
+      const spanY = Math.max(pyMax - pyMin, 1e-9);
+
+      for (const point of domePoints) {
+        const pointY = transformY(point.y);
+        if (!Number.isFinite(point.x) || !Number.isFinite(pointY)) {
+          continue;
+        }
+        const insideX = point.x >= pxMin - 0.7 * spanX && point.x <= pxMax + 0.7 * spanX;
+        const insideY = pointY >= pyMin - 0.8 * spanY && pointY <= pyMax + 0.8 * spanY;
+        if (insideX && insideY) {
+          boundsPoints.push(point);
+        }
+      }
+    }
+  }
+
+  const xValues = boundsPoints.map((p) => p.x).filter(Number.isFinite);
+  const yValues = boundsPoints.map((p) => p.y).filter(Number.isFinite);
   const yValuesTransformed = yValues.map(transformY).filter(Number.isFinite);
 
   let xMin = Math.min(...xValues);
@@ -3148,7 +3595,7 @@ function renderCyclePlot() {
     ctx.closePath();
     ctx.stroke();
 
-    const shortSegThreshold = 14;
+    const shortSegThreshold = 28;
     for (let i = 0; i < templateMapped.length; i += 1) {
       const from = templateMapped[i];
       const to = templateMapped[(i + 1) % templateMapped.length];
@@ -3164,19 +3611,23 @@ function renderCyclePlot() {
 
       const nx = dist > 1e-6 ? -dy / dist : 0;
       const ny = dist > 1e-6 ? dx / dist : -1;
-      const bump = 14;
+      const bump = Math.max(14, 34 - dist);
       const cx = (fromPx.x + toPx.x) / 2 + nx * bump;
       const cy = (fromPx.y + toPx.y) / 2 + ny * bump;
 
       ctx.save();
-      ctx.strokeStyle = "rgba(16, 163, 127, 0.78)";
-      ctx.lineWidth = 2.2;
-      ctx.setLineDash([5, 3]);
+      ctx.strokeStyle = "rgba(16, 163, 127, 0.95)";
+      ctx.lineWidth = 3.3;
       ctx.beginPath();
       ctx.moveTo(fromPx.x, fromPx.y);
       ctx.quadraticCurveTo(cx, cy, toPx.x, toPx.y);
       ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(fromPx.x, fromPx.y);
+      ctx.quadraticCurveTo(cx, cy, toPx.x, toPx.y);
+      ctx.stroke();
       ctx.fillStyle = "#0f8a6a";
       ctx.font = "10px JetBrains Mono";
       ctx.fillText(`${from.label}-${to.label}`, cx + 3, cy - 4);
@@ -3205,7 +3656,7 @@ function renderCyclePlot() {
   const markerLayout = markerInputs.map((point) => {
     const anchor = toCanvas(point.x, point.y);
     let drawPos = { ...anchor };
-    const minGap = 12;
+    const minGap = 18;
 
     for (const offset of markerOffsets) {
       const candidate = { x: anchor.x + offset.x, y: anchor.y + offset.y };
@@ -3261,6 +3712,7 @@ function renderCyclePlot() {
 
 function renderCyclePanel() {
   renderCycleMetrics();
+  renderCycleWarnings();
   renderCyclePointsTable();
   renderCyclePlot();
 }
@@ -3279,12 +3731,14 @@ function loadCycleTemplate(templateId, inputOverride = null) {
     state.cycle.templateInputs[templateId] = resolvedInputs;
     state.cycle.templatePoints = built.points;
     state.cycle.metrics = built.metrics;
+    state.cycle.warnings = built.warnings || [];
     state.cycle.workingFluid = built.fluid || null;
     setCycleStatus(`Loaded template: ${CYCLE_TEMPLATES.find((t) => t.id === templateId)?.label || templateId}.`, "ok");
     setCycleInputMessage("Cycle solved from current inputs.", "ok");
   } catch (error) {
     state.cycle.templatePoints = [];
     state.cycle.metrics = [];
+    state.cycle.warnings = [];
     state.cycle.workingFluid = null;
     setCycleStatus(error.message, "error");
     setCycleInputMessage(error.message, "error");
@@ -3344,8 +3798,70 @@ function solveCycleFromForm() {
     const inputs = readCycleInputsFromForm(templateId);
     state.cycle.templateInputs[templateId] = mergeCycleInputs(templateId, inputs);
     loadCycleTemplate(templateId, state.cycle.templateInputs[templateId]);
+    renderCycleInverseControls(templateId);
   } catch (error) {
     setCycleInputMessage(error.message, "error");
+    setCycleStatus(error.message, "warn");
+  }
+}
+
+function solveCycleUnknownFromForm() {
+  const templateId = state.cycle.templateId;
+  const fields = cycleInputSchema(templateId);
+  const metrics = cycleMetricSchema(templateId);
+  if (fields.length === 0 || metrics.length === 0) {
+    setCycleInverseMessage("Unknown solver is unavailable for this template.", "warn");
+    return;
+  }
+
+  try {
+    const unknownKey = el.cycleUnknownSelect.value;
+    const targetKey = el.cycleTargetMetricSelect.value;
+    if (!unknownKey) {
+      throw new Error("Select an unknown input.");
+    }
+    if (!targetKey) {
+      throw new Error("Select a target metric.");
+    }
+
+    const targetValue = parseOptionalCycleNumber(el.cycleTargetValue.value, "Target value");
+    if (!Number.isFinite(targetValue)) {
+      throw new Error("Target value is required.");
+    }
+
+    const minValue = parseOptionalCycleNumber(el.cycleSolveMin.value, "Search min");
+    const maxValue = parseOptionalCycleNumber(el.cycleSolveMax.value, "Search max");
+    const knownInputs = readCycleInputsFromFormExcluding(templateId, unknownKey);
+    const unknownGuessRaw = document.getElementById(`cycleInput_${unknownKey}`)?.value;
+    const unknownGuess = parseOptionalCycleNumber(unknownGuessRaw, "Unknown guess");
+    if (Number.isFinite(unknownGuess)) {
+      knownInputs[unknownKey] = unknownGuess;
+    }
+    const solved = solveUnknownByTarget(templateId, unknownKey, targetKey, targetValue, knownInputs, minValue, maxValue);
+
+    state.cycle.templateInputs[templateId] = solved.inputs;
+    const inverseConfig = cycleInverseInputsForTemplate(templateId);
+    inverseConfig.unknownKey = unknownKey;
+    inverseConfig.targetKey = targetKey;
+    inverseConfig.targetValue = targetValue;
+    inverseConfig.min = Number.isFinite(minValue) ? minValue : "";
+    inverseConfig.max = Number.isFinite(maxValue) ? maxValue : "";
+
+    renderCycleInputFields(templateId);
+    renderCycleInverseControls(templateId);
+    loadCycleTemplate(templateId, solved.inputs);
+
+    const fieldLabel = fields.find((field) => field.key === unknownKey)?.label || unknownKey;
+    const metricLabel = metrics.find((metric) => metric.key === targetKey)?.label || targetKey;
+    const residualAbs = Math.abs(solved.residual);
+    const solveKind = residualAbs <= Math.max(1e-6, Math.abs(targetValue) * 1e-5) ? "ok" : "warn";
+    setCycleInverseMessage(
+      `Solved ${fieldLabel}: ${formatNumber(solved.unknownValue)} | ${metricLabel}=${formatNumber(solved.metricValue)} (target ${formatNumber(targetValue)}).`,
+      solveKind,
+    );
+    setCycleStatus(`Unknown solver completed in ${solved.iterations} iterations.`, "ok");
+  } catch (error) {
+    setCycleInverseMessage(error.message, "error");
     setCycleStatus(error.message, "warn");
   }
 }
@@ -3371,7 +3887,9 @@ function wireCycleEvents() {
     if (!state.cycle.templateInputs[state.cycle.templateId]) {
       state.cycle.templateInputs[state.cycle.templateId] = defaultCycleInputs(state.cycle.templateId);
     }
+    cycleInverseInputsForTemplate(state.cycle.templateId);
     renderCycleInputFields(state.cycle.templateId);
+    renderCycleInverseControls(state.cycle.templateId);
     loadCycleTemplate(state.cycle.templateId, state.cycle.templateInputs[state.cycle.templateId]);
   });
 
@@ -3380,6 +3898,7 @@ function wireCycleEvents() {
     const defaults = defaultCycleInputs(templateId);
     state.cycle.templateInputs[templateId] = defaults;
     renderCycleInputFields(templateId);
+    renderCycleInverseControls(templateId);
     loadCycleTemplate(templateId, defaults);
   });
 
@@ -3387,6 +3906,63 @@ function wireCycleEvents() {
     el.cycleInputForm.addEventListener("submit", (event) => {
       event.preventDefault();
       solveCycleFromForm();
+    });
+  }
+
+  if (el.cycleInverseForm) {
+    el.cycleInverseForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      solveCycleUnknownFromForm();
+    });
+  }
+
+  if (el.cycleUnknownSelect) {
+    el.cycleUnknownSelect.addEventListener("change", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      config.unknownKey = el.cycleUnknownSelect.value;
+    });
+  }
+
+  if (el.cycleTargetMetricSelect) {
+    el.cycleTargetMetricSelect.addEventListener("change", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      config.targetKey = el.cycleTargetMetricSelect.value;
+    });
+  }
+
+  if (el.cycleTargetValue) {
+    el.cycleTargetValue.addEventListener("input", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      if (el.cycleTargetValue.value.trim() === "") {
+        config.targetValue = "";
+      } else {
+        const value = Number(el.cycleTargetValue.value);
+        config.targetValue = Number.isFinite(value) ? value : "";
+      }
+    });
+  }
+
+  if (el.cycleSolveMin) {
+    el.cycleSolveMin.addEventListener("input", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      if (el.cycleSolveMin.value.trim() === "") {
+        config.min = "";
+      } else {
+        const value = Number(el.cycleSolveMin.value);
+        config.min = Number.isFinite(value) ? value : "";
+      }
+    });
+  }
+
+  if (el.cycleSolveMax) {
+    el.cycleSolveMax.addEventListener("input", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      if (el.cycleSolveMax.value.trim() === "") {
+        config.max = "";
+      } else {
+        const value = Number(el.cycleSolveMax.value);
+        config.max = Number.isFinite(value) ? value : "";
+      }
     });
   }
 
@@ -3432,7 +4008,9 @@ async function loadDataset() {
     if (!state.cycle.templateInputs[state.cycle.templateId]) {
       state.cycle.templateInputs[state.cycle.templateId] = defaultCycleInputs(state.cycle.templateId);
     }
+    cycleInverseInputsForTemplate(state.cycle.templateId);
     renderCycleInputFields(state.cycle.templateId);
+    renderCycleInverseControls(state.cycle.templateId);
     loadCycleTemplate(state.cycle.templateId, state.cycle.templateInputs[state.cycle.templateId]);
 
     renderSessionStats();
@@ -3448,6 +4026,7 @@ async function loadDataset() {
     );
     setWorkflowStatus("Workflow panel unavailable until dataset is loaded.", "error");
     setCycleInputMessage("Cycle inputs unavailable until dataset is loaded.", "error");
+    setCycleInverseMessage("Unknown solver unavailable until dataset is loaded.", "error");
     setCycleStatus("Cycle plotter unavailable until dataset is loaded.", "error");
   } finally {
     setLookupLoading(false);

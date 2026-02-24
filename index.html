@@ -223,6 +223,28 @@
               <button type="submit" id="solveCycleBtn">Solve Cycle</button>
             </form>
 
+            <form id="cycleInverseForm" class="query-form">
+              <h3>Solve Unknown (General)</h3>
+
+              <label for="cycleUnknownSelect">Unknown input</label>
+              <select id="cycleUnknownSelect"></select>
+
+              <label for="cycleTargetMetricSelect">Target metric</label>
+              <select id="cycleTargetMetricSelect"></select>
+
+              <label for="cycleTargetValue">Target value</label>
+              <input id="cycleTargetValue" type="number" step="any" placeholder="For example 0.4 efficiency or 1200 kJ/kg" />
+
+              <label for="cycleSolveMin">Search min (optional)</label>
+              <input id="cycleSolveMin" type="number" step="any" placeholder="Auto if blank" />
+
+              <label for="cycleSolveMax">Search max (optional)</label>
+              <input id="cycleSolveMax" type="number" step="any" placeholder="Auto if blank" />
+
+              <p class="validation-msg" id="cycleInverseMessage"></p>
+              <button type="submit" id="solveUnknownBtn">Solve Unknown</button>
+            </form>
+
             <label class="check-label">
               <input type="checkbox" id="toggleDome" checked />
               Show saturation dome
@@ -265,6 +287,13 @@
                 <h3>Performance</h3>
                 <ul class="metric-list" id="cycleMetrics">
                   <li>No cycle metrics yet.</li>
+                </ul>
+              </section>
+
+              <section class="panel inner-panel">
+                <h3>Sanity Checks</h3>
+                <ul class="metric-list" id="cycleWarnings">
+                  <li>No warnings.</li>
                 </ul>
               </section>
 

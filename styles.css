@@ -504,6 +504,10 @@ button:disabled {
   margin-top: 5px;
 }
 
+#cycleWarnings li {
+  color: var(--warn);
+}
+
 @media (max-width: 1060px) {
   .lookup-layout,
   .workflow-layout,
