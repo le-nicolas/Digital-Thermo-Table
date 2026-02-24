@@ -56,6 +56,47 @@ const CYCLE_TEMPLATES = [
   { id: "steam-loop", label: "Simple Steam Loop", type: "rankine" },
 ];
 
+const CYCLE_INPUT_SCHEMAS = {
+  "rankine-ideal": [
+    { key: "pLow", label: "Condenser pressure P_low", defaultValue: 10, step: "any" },
+    { key: "pHigh", label: "Boiler pressure P_high", defaultValue: 8000, step: "any" },
+    { key: "t3", label: "Turbine inlet temperature T3", defaultValue: 480, step: "any" },
+    { key: "etaT", label: "Turbine efficiency eta_t", defaultValue: 1, step: "any" },
+    { key: "etaP", label: "Pump efficiency eta_p", defaultValue: 1, step: "any" },
+  ],
+  "rankine-reheat": [
+    { key: "pLow", label: "Condenser pressure P_low", defaultValue: 10, step: "any" },
+    { key: "pMid", label: "Reheat pressure P_mid", defaultValue: 2500, step: "any" },
+    { key: "pHigh", label: "Boiler pressure P_high", defaultValue: 12000, step: "any" },
+    { key: "t3", label: "HP turbine inlet temperature T3", defaultValue: 520, step: "any" },
+    { key: "t5", label: "Reheat temperature T5", defaultValue: 520, step: "any" },
+    { key: "etaTHP", label: "HP turbine efficiency", defaultValue: 1, step: "any" },
+    { key: "etaTLP", label: "LP turbine efficiency", defaultValue: 1, step: "any" },
+    { key: "etaP", label: "Pump efficiency eta_p", defaultValue: 1, step: "any" },
+  ],
+  vcr: [
+    { key: "pLow", label: "Evaporator pressure P_low", defaultValue: 220, step: "any" },
+    { key: "pHigh", label: "Condenser pressure P_high", defaultValue: 900, step: "any" },
+    { key: "superheat", label: "Evaporator outlet superheat DeltaT", defaultValue: 0, step: "any" },
+    { key: "etaC", label: "Compressor isentropic efficiency", defaultValue: 1, step: "any" },
+  ],
+  brayton: [
+    { key: "pLow", label: "Compressor inlet pressure P_low", defaultValue: 100, step: "any" },
+    { key: "pHigh", label: "Compressor outlet pressure P_high", defaultValue: 1000, step: "any" },
+    { key: "t1", label: "Compressor inlet temperature T1", defaultValue: 300, step: "any" },
+    { key: "t3", label: "Turbine inlet temperature T3", defaultValue: 950, step: "any" },
+    { key: "etaC", label: "Compressor efficiency eta_c", defaultValue: 1, step: "any" },
+    { key: "etaT", label: "Turbine efficiency eta_t", defaultValue: 1, step: "any" },
+  ],
+  "steam-loop": [
+    { key: "pLow", label: "Low pressure P_low", defaultValue: 500, step: "any" },
+    { key: "pHigh", label: "High pressure P_high", defaultValue: 5000, step: "any" },
+    { key: "t3", label: "Heater outlet temperature T3", defaultValue: 420, step: "any" },
+    { key: "etaT", label: "Expansion efficiency eta_t", defaultValue: 1, step: "any" },
+    { key: "etaP", label: "Pump efficiency eta_p", defaultValue: 1, step: "any" },
+  ],
+};
+
 const WORKFLOW_TYPES = [
   { id: "phase-check", label: "Phase Determination" },
   { id: "two-phase", label: "Two-Phase Mixture" },
@@ -86,9 +127,11 @@ const state = {
   cycle: {
     diagram: "Ts",
     templateId: "rankine-ideal",
+    templateInputs: {},
     templatePoints: [],
     manualPoints: [],
     metrics: [],
+    workingFluid: null,
     domeVisible: true,
     isobarsVisible: false,
   },
@@ -132,6 +175,10 @@ const el = {
   cycleDiagramSelect: document.getElementById("cycleDiagramSelect"),
   cycleTemplateSelect: document.getElementById("cycleTemplateSelect"),
   loadTemplateBtn: document.getElementById("loadTemplateBtn"),
+  cycleInputForm: document.getElementById("cycleInputForm"),
+  cycleInputFields: document.getElementById("cycleInputFields"),
+  cycleInputMessage: document.getElementById("cycleInputMessage"),
+  solveCycleBtn: document.getElementById("solveCycleBtn"),
   toggleDome: document.getElementById("toggleDome"),
   toggleIsobars: document.getElementById("toggleIsobars"),
   manualLabel: document.getElementById("manualLabel"),
@@ -208,6 +255,17 @@ function setCycleStatus(message, kind = "") {
   el.cycleStatus.className = "status";
   if (kind) {
     el.cycleStatus.classList.add(kind);
+  }
+}
+
+function setCycleInputMessage(message, kind = "") {
+  if (!el.cycleInputMessage) {
+    return;
+  }
+  el.cycleInputMessage.textContent = message;
+  el.cycleInputMessage.className = "validation-msg";
+  if (kind) {
+    el.cycleInputMessage.classList.add(kind);
   }
 }
 
@@ -2235,6 +2293,88 @@ function findTemplateBuilder(templateId) {
   return null;
 }
 
+function cycleInputSchema(templateId) {
+  return CYCLE_INPUT_SCHEMAS[templateId] || [];
+}
+
+function defaultCycleInputs(templateId) {
+  const defaults = {};
+  for (const field of cycleInputSchema(templateId)) {
+    defaults[field.key] = field.defaultValue;
+  }
+  return defaults;
+}
+
+function normalizedEfficiency(value, label) {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be greater than 0.`);
+  }
+  return value;
+}
+
+function mergeCycleInputs(templateId, inputOverride = null) {
+  const base = defaultCycleInputs(templateId);
+  if (!inputOverride) {
+    return base;
+  }
+
+  const merged = { ...base };
+  for (const field of cycleInputSchema(templateId)) {
+    const value = inputOverride[field.key];
+    if (Number.isFinite(value)) {
+      merged[field.key] = value;
+    }
+  }
+  return merged;
+}
+
+function readCycleInputsFromForm(templateId) {
+  const inputs = {};
+  for (const field of cycleInputSchema(templateId)) {
+    const input = document.getElementById(`cycleInput_${field.key}`);
+    if (!input) {
+      continue;
+    }
+    const raw = input.value.trim();
+    if (!raw) {
+      throw new Error(`${field.label} is required.`);
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new Error(`${field.label} must be numeric.`);
+    }
+    inputs[field.key] = value;
+  }
+  return inputs;
+}
+
+function renderCycleInputFields(templateId) {
+  if (!el.cycleInputFields) {
+    return;
+  }
+
+  const schema = cycleInputSchema(templateId);
+  el.cycleInputFields.innerHTML = "";
+
+  if (schema.length === 0) {
+    setCycleInputMessage("No configurable inputs for this template.");
+    return;
+  }
+
+  const current = mergeCycleInputs(templateId, state.cycle.templateInputs[templateId] || null);
+  for (const field of schema) {
+    const wrap = document.createElement("div");
+    wrap.className = "query-field";
+    wrap.innerHTML = `
+      <label for="cycleInput_${field.key}">${field.label}</label>
+      <input id="cycleInput_${field.key}" type="number" step="${field.step || "any"}" value="${String(current[field.key])}" />
+    `;
+    el.cycleInputFields.appendChild(wrap);
+  }
+
+  setCycleInputMessage("Update inputs and click Solve Cycle.");
+}
+
 function satStateAtPressure(table, pressure, props) {
   return interpolate1D(table.rows, "P", pressure, props).values;
 }
@@ -2247,7 +2387,139 @@ function clampTemperatureForPressure(table, pressure, preferredTemp) {
   return clamp(preferredTemp, range.min, range.max);
 }
 
-function buildIdealRankineTemplate() {
+function approximateCompressedLiquidTemperature(tRef, hRef, hOut) {
+  if (!Number.isFinite(tRef)) {
+    return null;
+  }
+  if (!Number.isFinite(hRef) || !Number.isFinite(hOut)) {
+    return tRef;
+  }
+  const deltaT = clamp((hOut - hRef) / 4.2, 0.2, 12);
+  return tRef + deltaT;
+}
+
+function solveIsentropicPtStateAtPressure(table, pressure, entropyTarget, fallbackTemp = null) {
+  try {
+    const values = interpolatePTByProperty(table, pressure, "s", entropyTarget, ["T", "P", "h", "s", "u", "v"]).values;
+    return { ...values, P: pressure, region: "single-phase" };
+  } catch (error) {
+    if (!Number.isFinite(fallbackTemp)) {
+      throw error;
+    }
+    const t = clampTemperatureForPressure(table, pressure, fallbackTemp);
+    const values = interpolatePT(table, t, pressure, ["T", "P", "h", "s", "u", "v"]).values;
+    return { ...values, P: pressure, region: "fallback-PT" };
+  }
+}
+
+function solvePtStateAtPressureAndEnthalpy(table, pressure, enthalpyTarget, fallbackTemp = null) {
+  try {
+    const values = interpolatePTByProperty(table, pressure, "h", enthalpyTarget, ["T", "P", "h", "s", "u", "v"]).values;
+    return { ...values, P: pressure, region: "single-phase" };
+  } catch (error) {
+    if (!Number.isFinite(fallbackTemp)) {
+      throw error;
+    }
+    const t = clampTemperatureForPressure(table, pressure, fallbackTemp);
+    const values = interpolatePT(table, t, pressure, ["T", "P", "h", "s", "u", "v"]).values;
+    return { ...values, P: pressure, region: "fallback-PT" };
+  }
+}
+
+function solveStateAtPressureAndEntropyWithSat(satTable, ptTable, pressure, entropyTarget) {
+  const sat = satStateAtPressure(satTable, pressure, ["T", "vf", "vfg", "uf", "ufg", "hf", "hfg", "sf", "sfg", "sg"]);
+  const sf = sat.sf;
+  const sg = Number.isFinite(sat.sg) ? sat.sg : Number.isFinite(sat.sf) && Number.isFinite(sat.sfg) ? sat.sf + sat.sfg : null;
+  const tol = 1e-7;
+
+  if (Number.isFinite(sf) && Number.isFinite(sg) && Number.isFinite(sat.sfg) && Math.abs(sat.sfg) > 1e-12) {
+    if (entropyTarget < sf - tol) {
+      return {
+        T: sat.T,
+        P: pressure,
+        h: sat.hf,
+        s: entropyTarget,
+        u: sat.uf,
+        v: sat.vf,
+        x: null,
+        region: "compressed-liquid-approx",
+      };
+    }
+
+    if (entropyTarget <= sg + tol) {
+      const xRaw = (entropyTarget - sf) / sat.sfg;
+      const x = clamp(xRaw, 0, 1);
+      return {
+        T: sat.T,
+        P: pressure,
+        h: Number.isFinite(sat.hf) && Number.isFinite(sat.hfg) ? sat.hf + x * sat.hfg : null,
+        s: entropyTarget,
+        u: Number.isFinite(sat.uf) && Number.isFinite(sat.ufg) ? sat.uf + x * sat.ufg : null,
+        v: Number.isFinite(sat.vf) && Number.isFinite(sat.vfg) ? sat.vf + x * sat.vfg : null,
+        x,
+        region: "saturated-mixture",
+      };
+    }
+  }
+
+  const superState = solveIsentropicPtStateAtPressure(ptTable, pressure, entropyTarget, sat.T);
+  return { ...superState, x: null, region: "superheated" };
+}
+
+function solveStateAtPressureAndEnthalpyWithSat(satTable, ptTable, pressure, hTarget, fallbackTemp = null) {
+  const sat = satStateAtPressure(satTable, pressure, ["T", "vf", "vfg", "uf", "ufg", "hf", "hfg", "sf", "sfg", "sg"]);
+  const hf = sat.hf;
+  const hg = Number.isFinite(sat.hg) ? sat.hg : Number.isFinite(sat.hf) && Number.isFinite(sat.hfg) ? sat.hf + sat.hfg : null;
+  const tol = 1e-7;
+
+  if (Number.isFinite(hf) && Number.isFinite(hg) && Number.isFinite(sat.hfg) && Math.abs(sat.hfg) > 1e-12) {
+    if (hTarget < hf - tol) {
+      return {
+        T: sat.T,
+        P: pressure,
+        h: hTarget,
+        s: sat.sf,
+        u: sat.uf,
+        v: sat.vf,
+        x: null,
+        region: "compressed-liquid-approx",
+      };
+    }
+
+    if (hTarget <= hg + tol) {
+      const xRaw = (hTarget - hf) / sat.hfg;
+      const x = clamp(xRaw, 0, 1);
+      return {
+        T: sat.T,
+        P: pressure,
+        h: hTarget,
+        s: Number.isFinite(sat.sf) && Number.isFinite(sat.sfg) ? sat.sf + x * sat.sfg : null,
+        u: Number.isFinite(sat.uf) && Number.isFinite(sat.ufg) ? sat.uf + x * sat.ufg : null,
+        v: Number.isFinite(sat.vf) && Number.isFinite(sat.vfg) ? sat.vf + x * sat.vfg : null,
+        x,
+        region: "saturated-mixture",
+      };
+    }
+  }
+
+  try {
+    const superState = interpolatePTByProperty(ptTable, pressure, "h", hTarget, ["T", "P", "h", "s", "u", "v"]).values;
+    return { ...superState, x: null, region: "superheated" };
+  } catch (error) {
+    if (!Number.isFinite(fallbackTemp)) {
+      throw error;
+    }
+    const t = clampTemperatureForPressure(ptTable, pressure, fallbackTemp);
+    const values = interpolatePT(ptTable, t, pressure, ["T", "P", "h", "s", "u", "v"]).values;
+    return { ...values, x: null, region: "fallback-PT" };
+  }
+}
+
+function solveIsentropicWaterStateAtPressure(satPWater, superWater, pressure, entropyTarget) {
+  return solveStateAtPressureAndEntropyWithSat(satPWater, superWater, pressure, entropyTarget);
+}
+
+function buildIdealRankineTemplate(inputOverride = null) {
   const satPWater = findBestTable({ mode: "sat-P", fluidRegex: /water/i, unitSystem: "SI" });
   const superWater = findBestTable({ mode: "PT", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /superheated/i });
 
@@ -2255,43 +2527,59 @@ function buildIdealRankineTemplate() {
     throw new Error("Missing SI water tables for Ideal Rankine template.");
   }
 
-  const pLow = 10;
-  const pHigh = 8000;
+  const cfg = mergeCycleInputs("rankine-ideal", inputOverride);
+  const pLow = cfg.pLow;
+  const pHigh = cfg.pHigh;
+  const etaT = normalizedEfficiency(cfg.etaT, "Turbine efficiency");
+  const etaP = normalizedEfficiency(cfg.etaP, "Pump efficiency");
+  if (!(pHigh > pLow)) {
+    throw new Error("For Rankine, P_high must be greater than P_low.");
+  }
 
   const st1 = satStateAtPressure(satPWater, pLow, ["T", "vf", "hf", "sf"]);
-  const t3 = clampTemperatureForPressure(superWater, pHigh, 480);
-  const st3 = interpolatePT(superWater, t3, pHigh, ["h", "s"]).values;
-
-  const t4 = clampTemperatureForPressure(superWater, pLow, 220);
-  const st4 = interpolatePT(superWater, t4, pLow, ["h", "s"]).values;
+  const t3 = clampTemperatureForPressure(superWater, pHigh, cfg.t3);
+  const st3 = interpolatePT(superWater, t3, pHigh, ["h", "s", "u", "v"]).values;
 
   const h1 = st1.hf;
-  const h2 = h1 + (st1.vf || 0.001) * (pHigh - pLow);
+  const h2s = h1 + (st1.vf || 0.001) * (pHigh - pLow);
+  const h2 = h1 + (h2s - h1) / etaP;
+  const t2 = approximateCompressedLiquidTemperature(st1.T, h1, h2);
+  const st4s = solveStateAtPressureAndEntropyWithSat(satPWater, superWater, pLow, st3.s);
+  const h4 = st3.h - etaT * (st3.h - st4s.h);
+  const st4 = solveStateAtPressureAndEnthalpyWithSat(satPWater, superWater, pLow, h4, st4s.T);
 
   const points = [
     { point: "1", label: "Condenser outlet", T: st1.T, P: pLow, h: h1, s: st1.sf },
-    { point: "2", label: "Pump outlet", T: st1.T + 3, P: pHigh, h: h2, s: st1.sf },
+    { point: "2", label: "Pump outlet", T: t2, P: pHigh, h: h2, s: st1.sf },
     { point: "3", label: "Turbine inlet", T: t3, P: pHigh, h: st3.h, s: st3.s },
-    { point: "4", label: "Turbine outlet", T: t4, P: pLow, h: st4.h, s: st4.s },
+    { point: "4", label: "Turbine outlet", T: st4.T, P: pLow, h: st4.h, s: st4.s, x: st4.x },
   ];
 
   const wt = points[2].h - points[3].h;
   const wp = points[1].h - points[0].h;
   const wnet = wt - wp;
   const qin = points[2].h - points[1].h;
+  const qout = points[3].h - points[0].h;
 
   const metrics = [
     { label: "Turbine work", value: wt, unit: "kJ/kg" },
     { label: "Pump work", value: wp, unit: "kJ/kg" },
     { label: "Net work", value: wnet, unit: "kJ/kg" },
+    { label: "Heat input", value: qin, unit: "kJ/kg" },
+    { label: "Heat rejected", value: qout, unit: "kJ/kg" },
     { label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
     { label: "Back work ratio", value: safeRatio(wp, wt), unit: "-" },
   ];
+  if (Number.isFinite(st4.x)) {
+    metrics.push({ label: "Turbine exit quality", value: st4.x, unit: "-" });
+  }
+  metrics.push({ label: "eta_t used", value: etaT, unit: "-" });
+  metrics.push({ label: "eta_p used", value: etaP, unit: "-" });
 
-  return { points, metrics };
+  return { points, metrics, fluid: superWater.fluid || "Water" };
 }
 
-function buildRankineReheatTemplate() {
+function buildRankineReheatTemplate(inputOverride = null) {
   const satPWater = findBestTable({ mode: "sat-P", fluidRegex: /water/i, unitSystem: "SI" });
   const superWater = findBestTable({ mode: "PT", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /superheated/i });
 
@@ -2299,76 +2587,114 @@ function buildRankineReheatTemplate() {
     throw new Error("Missing SI water tables for Rankine reheat template.");
   }
 
-  const pLow = 10;
-  const pMid = 2500;
-  const pHigh = 12000;
+  const cfg = mergeCycleInputs("rankine-reheat", inputOverride);
+  const pLow = cfg.pLow;
+  const pMid = cfg.pMid;
+  const pHigh = cfg.pHigh;
+  const etaTHP = normalizedEfficiency(cfg.etaTHP, "HP turbine efficiency");
+  const etaTLP = normalizedEfficiency(cfg.etaTLP, "LP turbine efficiency");
+  const etaP = normalizedEfficiency(cfg.etaP, "Pump efficiency");
+
+  if (!(pHigh > pMid && pMid > pLow)) {
+    throw new Error("For reheat Rankine, pressures must satisfy P_high > P_mid > P_low.");
+  }
 
   const st1 = satStateAtPressure(satPWater, pLow, ["T", "vf", "hf", "sf"]);
-  const h2 = st1.hf + (st1.vf || 0.001) * (pHigh - pLow);
+  const h2s = st1.hf + (st1.vf || 0.001) * (pHigh - pLow);
+  const h2 = st1.hf + (h2s - st1.hf) / etaP;
+  const t2 = approximateCompressedLiquidTemperature(st1.T, st1.hf, h2);
 
-  const t3 = clampTemperatureForPressure(superWater, pHigh, 520);
-  const st3 = interpolatePT(superWater, t3, pHigh, ["h", "s"]).values;
+  const t3 = clampTemperatureForPressure(superWater, pHigh, cfg.t3);
+  const st3 = interpolatePT(superWater, t3, pHigh, ["h", "s", "u", "v"]).values;
+  const st4s = solveStateAtPressureAndEntropyWithSat(satPWater, superWater, pMid, st3.s);
+  const h4 = st3.h - etaTHP * (st3.h - st4s.h);
+  const st4 = solveStateAtPressureAndEnthalpyWithSat(satPWater, superWater, pMid, h4, st4s.T);
 
-  const t4 = clampTemperatureForPressure(superWater, pMid, 360);
-  const st4 = interpolatePT(superWater, t4, pMid, ["h", "s"]).values;
-
-  const t5 = clampTemperatureForPressure(superWater, pMid, 520);
-  const st5 = interpolatePT(superWater, t5, pMid, ["h", "s"]).values;
-
-  const t6 = clampTemperatureForPressure(superWater, pLow, 240);
-  const st6 = interpolatePT(superWater, t6, pLow, ["h", "s"]).values;
+  const t5 = clampTemperatureForPressure(superWater, pMid, cfg.t5);
+  const st5 = interpolatePT(superWater, t5, pMid, ["h", "s", "u", "v"]).values;
+  const st6s = solveStateAtPressureAndEntropyWithSat(satPWater, superWater, pLow, st5.s);
+  const h6 = st5.h - etaTLP * (st5.h - st6s.h);
+  const st6 = solveStateAtPressureAndEnthalpyWithSat(satPWater, superWater, pLow, h6, st6s.T);
 
   const points = [
     { point: "1", label: "Condenser outlet", T: st1.T, P: pLow, h: st1.hf, s: st1.sf },
-    { point: "2", label: "Pump outlet", T: st1.T + 4, P: pHigh, h: h2, s: st1.sf },
+    { point: "2", label: "Pump outlet", T: t2, P: pHigh, h: h2, s: st1.sf },
     { point: "3", label: "HP turbine inlet", T: t3, P: pHigh, h: st3.h, s: st3.s },
-    { point: "4", label: "After HP expansion", T: t4, P: pMid, h: st4.h, s: st4.s },
+    { point: "4", label: "After HP expansion", T: st4.T, P: pMid, h: st4.h, s: st4.s, x: st4.x },
     { point: "5", label: "After reheat", T: t5, P: pMid, h: st5.h, s: st5.s },
-    { point: "6", label: "LP turbine outlet", T: t6, P: pLow, h: st6.h, s: st6.s },
+    { point: "6", label: "LP turbine outlet", T: st6.T, P: pLow, h: st6.h, s: st6.s, x: st6.x },
   ];
 
   const wt = (points[2].h - points[3].h) + (points[4].h - points[5].h);
   const wp = points[1].h - points[0].h;
   const qin = (points[2].h - points[1].h) + (points[4].h - points[3].h);
   const wnet = wt - wp;
+  const qout = points[5].h - points[0].h;
 
   const metrics = [
     { label: "Turbine work", value: wt, unit: "kJ/kg" },
     { label: "Pump work", value: wp, unit: "kJ/kg" },
     { label: "Net work", value: wnet, unit: "kJ/kg" },
+    { label: "Heat input", value: qin, unit: "kJ/kg" },
+    { label: "Heat rejected", value: qout, unit: "kJ/kg" },
     { label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
     { label: "Back work ratio", value: safeRatio(wp, wt), unit: "-" },
   ];
+  if (Number.isFinite(st6.x)) {
+    metrics.push({ label: "LP turbine exit quality", value: st6.x, unit: "-" });
+  }
+  metrics.push({ label: "eta_t,HP used", value: etaTHP, unit: "-" });
+  metrics.push({ label: "eta_t,LP used", value: etaTLP, unit: "-" });
+  metrics.push({ label: "eta_p used", value: etaP, unit: "-" });
 
-  return { points, metrics };
+  return { points, metrics, fluid: superWater.fluid || "Water" };
 }
 
-function buildVcrTemplate() {
-  const satR = findBestTable({ mode: "sat-T", fluidRegex: /r 134a/i, unitSystem: "SI" });
-  const superR = findBestTable({ mode: "PT", fluidRegex: /r 134a/i, unitSystem: "SI" });
+function buildVcrTemplate(inputOverride = null) {
+  const satR = findBestTable({ mode: "sat-T", fluidRegex: /r[\s-]*134a/i, unitSystem: "SI" });
+  const superR = findBestTable({ mode: "PT", fluidRegex: /r[\s-]*134a/i, unitSystem: "SI" });
 
   if (!satR || !superR) {
     throw new Error("Missing SI R-134a tables for refrigeration template.");
   }
 
-  const pLow = 220;
-  const pHigh = 900;
+  const cfg = mergeCycleInputs("vcr", inputOverride);
+  const pLow = cfg.pLow;
+  const pHigh = cfg.pHigh;
+  const etaC = normalizedEfficiency(cfg.etaC, "Compressor efficiency");
+  const superheat = Number.isFinite(cfg.superheat) ? cfg.superheat : 0;
+  if (!(pHigh > pLow)) {
+    throw new Error("For VCR, condenser pressure must be greater than evaporator pressure.");
+  }
 
-  const lowSat = interpolate1D(satR.rows, "P", pLow, ["T", "hf", "hfg", "hg", "sf", "sfg", "sg"]).values;
+  const lowSat = interpolate1D(satR.rows, "P", pLow, ["T", "hf", "hfg", "hg", "sf", "sfg", "sg", "vf", "vfg"]).values;
   const highSat = interpolate1D(satR.rows, "P", pHigh, ["T", "hf", "hg", "sf", "sg"]).values;
 
-  const t2 = clampTemperatureForPressure(superR, pHigh, 60);
-  const st2 = interpolatePT(superR, t2, pHigh, ["h", "s"]).values;
+  let st1 = {
+    T: lowSat.T,
+    P: pLow,
+    h: lowSat.hg,
+    s: lowSat.sg,
+  };
+  if (superheat > 1e-9) {
+    const t1 = clampTemperatureForPressure(superR, pLow, lowSat.T + superheat);
+    st1 = interpolatePT(superR, t1, pLow, ["T", "P", "h", "s", "u", "v"]).values;
+  }
 
-  const h4 = highSat.hf;
-  const quality4 = Number.isFinite(lowSat.hfg) && Math.abs(lowSat.hfg) > 1e-12 ? clamp((h4 - lowSat.hf) / lowSat.hfg, 0, 1) : 0;
-  const s4 = Number.isFinite(lowSat.sfg) ? lowSat.sf + quality4 * lowSat.sfg : lowSat.sf;
+  const st2s = solveIsentropicPtStateAtPressure(superR, pHigh, st1.s, lowSat.T + Math.max(12, superheat));
+  const h2 = st1.h + (st2s.h - st1.h) / etaC;
+  const st2 = solveStateAtPressureAndEnthalpyWithSat(satR, superR, pHigh, h2, st2s.T);
+
+  const h3 = highSat.hf;
+  const h4 = h3;
+  const quality4 = Number.isFinite(lowSat.hfg) && Math.abs(lowSat.hfg) > 1e-12 ? (h4 - lowSat.hf) / lowSat.hfg : null;
+  const s4 = Number.isFinite(quality4) && Number.isFinite(lowSat.sfg) ? lowSat.sf + quality4 * lowSat.sfg : lowSat.sf;
 
   const points = [
-    { point: "1", label: "Evaporator outlet", T: lowSat.T, P: pLow, h: lowSat.hg, s: lowSat.sg },
-    { point: "2", label: "Compressor outlet", T: t2, P: pHigh, h: st2.h, s: st2.s },
+    { point: "1", label: "Evaporator outlet", T: st1.T, P: pLow, h: st1.h, s: st1.s },
+    { point: "2", label: "Compressor outlet", T: st2.T, P: pHigh, h: st2.h, s: st2.s },
     { point: "3", label: "Condenser outlet", T: highSat.T, P: pHigh, h: highSat.hf, s: highSat.sf },
-    { point: "4", label: "Valve outlet", T: lowSat.T, P: pLow, h: h4, s: s4 },
+    { point: "4", label: "Valve outlet", T: lowSat.T, P: pLow, h: h4, s: s4, x: quality4 },
   ];
 
   const compressorWork = points[1].h - points[0].h;
@@ -2380,35 +2706,46 @@ function buildVcrTemplate() {
     { label: "Refrigerating effect", value: refrigeratingEffect, unit: "kJ/kg" },
     { label: "Heat rejected", value: heatRejected, unit: "kJ/kg" },
     { label: "COP", value: safeRatio(refrigeratingEffect, compressorWork), unit: "-" },
+    { label: "eta_c used", value: etaC, unit: "-" },
   ];
+  if (Number.isFinite(quality4)) {
+    metrics.push({ label: "Valve exit quality", value: quality4, unit: "-" });
+  }
 
-  return { points, metrics };
+  return { points, metrics, fluid: satR.fluid };
 }
 
-function buildBraytonTemplate() {
+function buildBraytonTemplate(inputOverride = null) {
   const nitrogen = findBestTable({ mode: "PT", fluidRegex: /nitrogen/i, unitSystem: "SI" });
   if (!nitrogen) {
     throw new Error("Missing SI Nitrogen PT table for Brayton template.");
   }
 
-  const pLow = 100;
-  const pHigh = 1000;
+  const cfg = mergeCycleInputs("brayton", inputOverride);
+  const pLow = cfg.pLow;
+  const pHigh = cfg.pHigh;
+  const etaC = normalizedEfficiency(cfg.etaC, "Compressor efficiency");
+  const etaT = normalizedEfficiency(cfg.etaT, "Turbine efficiency");
+  if (!(pHigh > pLow)) {
+    throw new Error("For Brayton, P_high must be greater than P_low.");
+  }
 
-  const t1 = clampTemperatureForPressure(nitrogen, pLow, 300);
-  const t2 = clampTemperatureForPressure(nitrogen, pHigh, 500);
-  const t3 = clampTemperatureForPressure(nitrogen, pHigh, 950);
-  const t4 = clampTemperatureForPressure(nitrogen, pLow, 650);
-
-  const st1 = interpolatePT(nitrogen, t1, pLow, ["h", "s"]).values;
-  const st2 = interpolatePT(nitrogen, t2, pHigh, ["h", "s"]).values;
-  const st3 = interpolatePT(nitrogen, t3, pHigh, ["h", "s"]).values;
-  const st4 = interpolatePT(nitrogen, t4, pLow, ["h", "s"]).values;
+  const t1 = clampTemperatureForPressure(nitrogen, pLow, cfg.t1);
+  const st1 = interpolatePT(nitrogen, t1, pLow, ["h", "s", "u", "v"]).values;
+  const st2s = solveIsentropicPtStateAtPressure(nitrogen, pHigh, st1.s, 500);
+  const h2 = st1.h + (st2s.h - st1.h) / etaC;
+  const st2Actual = solvePtStateAtPressureAndEnthalpy(nitrogen, pHigh, h2, st2s.T);
+  const t3 = clampTemperatureForPressure(nitrogen, pHigh, cfg.t3);
+  const st3 = interpolatePT(nitrogen, t3, pHigh, ["h", "s", "u", "v"]).values;
+  const st4s = solveIsentropicPtStateAtPressure(nitrogen, pLow, st3.s, 650);
+  const h4 = st3.h - etaT * (st3.h - st4s.h);
+  const st4 = solvePtStateAtPressureAndEnthalpy(nitrogen, pLow, h4, st4s.T);
 
   const points = [
     { point: "1", label: "Compressor inlet", T: t1, P: pLow, h: st1.h, s: st1.s },
-    { point: "2", label: "Compressor outlet", T: t2, P: pHigh, h: st2.h, s: st2.s },
+    { point: "2", label: "Compressor outlet", T: st2Actual.T, P: pHigh, h: st2Actual.h, s: st2Actual.s },
     { point: "3", label: "Turbine inlet", T: t3, P: pHigh, h: st3.h, s: st3.s },
-    { point: "4", label: "Turbine outlet", T: t4, P: pLow, h: st4.h, s: st4.s },
+    { point: "4", label: "Turbine outlet", T: st4.T, P: pLow, h: st4.h, s: st4.s },
   ];
 
   const compressorWork = points[1].h - points[0].h;
@@ -2420,13 +2757,16 @@ function buildBraytonTemplate() {
     { label: "Compressor work", value: compressorWork, unit: "kJ/kg" },
     { label: "Turbine work", value: turbineWork, unit: "kJ/kg" },
     { label: "Net work", value: netWork, unit: "kJ/kg" },
+    { label: "Pressure ratio", value: safeRatio(pHigh, pLow), unit: "-" },
     { label: "Thermal efficiency", value: safeRatio(netWork, qIn), unit: "-" },
+    { label: "eta_c used", value: etaC, unit: "-" },
+    { label: "eta_t used", value: etaT, unit: "-" },
   ];
 
-  return { points, metrics };
+  return { points, metrics, fluid: nitrogen.fluid };
 }
 
-function buildSteamLoopTemplate() {
+function buildSteamLoopTemplate(inputOverride = null) {
   const satPWater = findBestTable({ mode: "sat-P", fluidRegex: /water/i, unitSystem: "SI" });
   const superWater = findBestTable({ mode: "PT", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /superheated/i });
 
@@ -2434,38 +2774,54 @@ function buildSteamLoopTemplate() {
     throw new Error("Missing SI water tables for steam loop template.");
   }
 
-  const pLow = 500;
-  const pHigh = 5000;
+  const cfg = mergeCycleInputs("steam-loop", inputOverride);
+  const pLow = cfg.pLow;
+  const pHigh = cfg.pHigh;
+  const etaT = normalizedEfficiency(cfg.etaT, "Expansion efficiency");
+  const etaP = normalizedEfficiency(cfg.etaP, "Pump efficiency");
+  if (!(pHigh > pLow)) {
+    throw new Error("For steam loop, P_high must be greater than P_low.");
+  }
 
   const st1 = satStateAtPressure(satPWater, pLow, ["T", "vf", "hf", "sf"]);
-  const h2 = st1.hf + (st1.vf || 0.001) * (pHigh - pLow);
+  const h2s = st1.hf + (st1.vf || 0.001) * (pHigh - pLow);
+  const h2 = st1.hf + (h2s - st1.hf) / etaP;
+  const t2 = approximateCompressedLiquidTemperature(st1.T, st1.hf, h2);
 
-  const t3 = clampTemperatureForPressure(superWater, pHigh, 420);
-  const st3 = interpolatePT(superWater, t3, pHigh, ["h", "s"]).values;
-
-  const t4 = clampTemperatureForPressure(superWater, pLow, 260);
-  const st4 = interpolatePT(superWater, t4, pLow, ["h", "s"]).values;
+  const t3 = clampTemperatureForPressure(superWater, pHigh, cfg.t3);
+  const st3 = interpolatePT(superWater, t3, pHigh, ["h", "s", "u", "v"]).values;
+  const st4s = solveStateAtPressureAndEntropyWithSat(satPWater, superWater, pLow, st3.s);
+  const h4 = st3.h - etaT * (st3.h - st4s.h);
+  const st4 = solveStateAtPressureAndEnthalpyWithSat(satPWater, superWater, pLow, h4, st4s.T);
 
   const points = [
     { point: "1", label: "Feedwater", T: st1.T, P: pLow, h: st1.hf, s: st1.sf },
-    { point: "2", label: "After pump", T: st1.T + 4, P: pHigh, h: h2, s: st1.sf },
+    { point: "2", label: "After pump", T: t2, P: pHigh, h: h2, s: st1.sf },
     { point: "3", label: "Heated vapor", T: t3, P: pHigh, h: st3.h, s: st3.s },
-    { point: "4", label: "Expansion outlet", T: t4, P: pLow, h: st4.h, s: st4.s },
+    { point: "4", label: "Expansion outlet", T: st4.T, P: pLow, h: st4.h, s: st4.s, x: st4.x },
   ];
 
   const wt = points[2].h - points[3].h;
   const wp = points[1].h - points[0].h;
   const wnet = wt - wp;
   const qin = points[2].h - points[1].h;
+  const qout = points[3].h - points[0].h;
 
   const metrics = [
     { label: "Turbine-side work", value: wt, unit: "kJ/kg" },
     { label: "Pump-side work", value: wp, unit: "kJ/kg" },
     { label: "Net specific work", value: wnet, unit: "kJ/kg" },
+    { label: "Heat input", value: qin, unit: "kJ/kg" },
+    { label: "Heat rejected", value: qout, unit: "kJ/kg" },
     { label: "Thermal efficiency", value: safeRatio(wnet, qin), unit: "-" },
   ];
+  if (Number.isFinite(st4.x)) {
+    metrics.push({ label: "Expansion exit quality", value: st4.x, unit: "-" });
+  }
+  metrics.push({ label: "eta_t used", value: etaT, unit: "-" });
+  metrics.push({ label: "eta_p used", value: etaP, unit: "-" });
 
-  return { points, metrics };
+  return { points, metrics, fluid: superWater.fluid || "Water" };
 }
 function populateCycleTemplateSelect() {
   el.cycleTemplateSelect.innerHTML = "";
@@ -2475,6 +2831,8 @@ function populateCycleTemplateSelect() {
     option.textContent = template.label;
     el.cycleTemplateSelect.appendChild(option);
   }
+  const exists = CYCLE_TEMPLATES.some((template) => template.id === state.cycle.templateId);
+  state.cycle.templateId = exists ? state.cycle.templateId : CYCLE_TEMPLATES[0].id;
   el.cycleTemplateSelect.value = state.cycle.templateId;
 }
 
@@ -2538,13 +2896,17 @@ function mapPointToDiagram(point, diagram) {
   return { x: point.s, y: point.h, label: point.point };
 }
 
-function getSaturationDome(diagram) {
-  const satWater = findBestTable({ mode: "sat-T", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /saturated water/i });
-  if (!satWater) {
+function getSaturationDome(diagram, fluidName = "Water") {
+  const exactFluidRegex = new RegExp(`^${escapeRegex(fluidName)}$`, "i");
+  let satTable = findBestTable({ mode: "sat-T", fluidRegex: exactFluidRegex, unitSystem: "SI" });
+  if (!satTable) {
+    satTable = findBestTable({ mode: "sat-T", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /saturated water/i });
+  }
+  if (!satTable) {
     return { liquid: [], vapor: [] };
   }
 
-  const sortedRows = sortRowsByKey(satWater.rows, "T");
+  const sortedRows = sortRowsByKey(satTable.rows, "T");
   const liquid = [];
   const vapor = [];
 
@@ -2576,13 +2938,17 @@ function getSaturationDome(diagram) {
   return { liquid, vapor };
 }
 
-function getIsobarCurves(diagram) {
-  const superWater = findBestTable({ mode: "PT", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /superheated/i });
-  if (!superWater) {
+function getIsobarCurves(diagram, fluidName = "Water") {
+  const exactFluidRegex = new RegExp(`^${escapeRegex(fluidName)}$`, "i");
+  let ptTable = findBestTable({ mode: "PT", fluidRegex: exactFluidRegex, unitSystem: "SI" });
+  if (!ptTable) {
+    ptTable = findBestTable({ mode: "PT", fluidRegex: /water/i, unitSystem: "SI", sheetRegex: /superheated/i });
+  }
+  if (!ptTable) {
     return [];
   }
 
-  const groups = buildPressureGroups(superWater.rows);
+  const groups = buildPressureGroups(ptTable.rows);
   if (groups.length === 0) {
     return [];
   }
@@ -2627,9 +2993,10 @@ function renderCyclePlot() {
 
   const diagram = state.cycle.diagram;
   const isPh = diagram === "Ph";
+  const referenceFluid = state.cycle.workingFluid || "Water";
 
-  const dome = state.cycle.domeVisible ? getSaturationDome(diagram) : { liquid: [], vapor: [] };
-  const isobars = state.cycle.isobarsVisible ? getIsobarCurves(diagram) : [];
+  const dome = state.cycle.domeVisible ? getSaturationDome(diagram, referenceFluid) : { liquid: [], vapor: [] };
+  const isobars = state.cycle.isobarsVisible ? getIsobarCurves(diagram, referenceFluid) : [];
 
   const templateMapped = state.cycle.templatePoints
     .map((point) => mapPointToDiagram(point, diagram))
@@ -2780,34 +3147,116 @@ function renderCyclePlot() {
     }
     ctx.closePath();
     ctx.stroke();
+
+    const shortSegThreshold = 14;
+    for (let i = 0; i < templateMapped.length; i += 1) {
+      const from = templateMapped[i];
+      const to = templateMapped[(i + 1) % templateMapped.length];
+      const fromPx = toCanvas(from.x, from.y);
+      const toPx = toCanvas(to.x, to.y);
+      const dx = toPx.x - fromPx.x;
+      const dy = toPx.y - fromPx.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist >= shortSegThreshold) {
+        continue;
+      }
+
+      const nx = dist > 1e-6 ? -dy / dist : 0;
+      const ny = dist > 1e-6 ? dx / dist : -1;
+      const bump = 14;
+      const cx = (fromPx.x + toPx.x) / 2 + nx * bump;
+      const cy = (fromPx.y + toPx.y) / 2 + ny * bump;
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(16, 163, 127, 0.78)";
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      ctx.moveTo(fromPx.x, fromPx.y);
+      ctx.quadraticCurveTo(cx, cy, toPx.x, toPx.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#0f8a6a";
+      ctx.font = "10px JetBrains Mono";
+      ctx.fillText(`${from.label}-${to.label}`, cx + 3, cy - 4);
+      ctx.restore();
+    }
   }
 
+  const markerInputs = [
+    ...templateMapped.map((point) => ({ ...point, markerSource: "template" })),
+    ...manualMapped.map((point) => ({ ...point, markerSource: "manual" })),
+  ];
+
+  const markerOffsets = [
+    { x: 0, y: 0 },
+    { x: 12, y: -10 },
+    { x: -12, y: -10 },
+    { x: 12, y: 10 },
+    { x: -12, y: 10 },
+    { x: 16, y: 0 },
+    { x: -16, y: 0 },
+    { x: 0, y: 16 },
+    { x: 0, y: -16 },
+  ];
+
+  const placed = [];
+  const markerLayout = markerInputs.map((point) => {
+    const anchor = toCanvas(point.x, point.y);
+    let drawPos = { ...anchor };
+    const minGap = 12;
+
+    for (const offset of markerOffsets) {
+      const candidate = { x: anchor.x + offset.x, y: anchor.y + offset.y };
+      const overlaps = placed.some((pos) => Math.hypot(candidate.x - pos.x, candidate.y - pos.y) < minGap);
+      if (!overlaps) {
+        drawPos = candidate;
+        break;
+      }
+    }
+
+    placed.push(drawPos);
+    return { ...point, anchorX: anchor.x, anchorY: anchor.y, drawX: drawPos.x, drawY: drawPos.y };
+  });
+
+  const templateMarkers = markerLayout.filter((point) => point.markerSource === "template");
+  const manualMarkers = markerLayout.filter((point) => point.markerSource === "manual");
+
   const drawPoint = (point, fillStyle, strokeStyle) => {
-    const pos = toCanvas(point.x, point.y);
+    if (Math.hypot(point.drawX - point.anchorX, point.drawY - point.anchorY) > 1) {
+      ctx.strokeStyle = "rgba(107, 114, 128, 0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(point.anchorX, point.anchorY);
+      ctx.lineTo(point.drawX, point.drawY);
+      ctx.stroke();
+    }
+
     ctx.fillStyle = fillStyle;
     ctx.strokeStyle = strokeStyle;
     ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 4.3, 0, Math.PI * 2);
+    ctx.arc(point.drawX, point.drawY, 4.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
     ctx.fillStyle = "#1a1d21";
     ctx.font = "11px JetBrains Mono";
-    ctx.fillText(point.label || "", pos.x + 6, pos.y - 6);
+    ctx.fillText(point.label || "", point.drawX + 6, point.drawY - 6);
   };
 
-  for (const point of templateMapped) {
+  for (const point of templateMarkers) {
     drawPoint(point, "#10a37f", "#5bc9ab");
   }
 
-  for (const point of manualMapped) {
+  for (const point of manualMarkers) {
     drawPoint(point, "#64748b", "#cbd5e1");
   }
 
   ctx.fillStyle = "#6b7280";
   ctx.font = "11px JetBrains Mono";
-  ctx.fillText(`Diagram: ${diagram}`, margin.left, margin.top - 8);
+  ctx.fillText(`Diagram: ${diagram} | Fluid: ${referenceFluid}`, margin.left, margin.top - 8);
 }
 
 function renderCyclePanel() {
@@ -2816,7 +3265,7 @@ function renderCyclePanel() {
   renderCyclePlot();
 }
 
-function loadCycleTemplate(templateId) {
+function loadCycleTemplate(templateId, inputOverride = null) {
   const builder = findTemplateBuilder(templateId);
   if (!builder) {
     setCycleStatus("Unknown cycle template.", "error");
@@ -2824,15 +3273,21 @@ function loadCycleTemplate(templateId) {
   }
 
   try {
-    const built = builder();
+    const resolvedInputs = mergeCycleInputs(templateId, inputOverride || state.cycle.templateInputs[templateId] || null);
+    const built = builder(resolvedInputs);
     state.cycle.templateId = templateId;
+    state.cycle.templateInputs[templateId] = resolvedInputs;
     state.cycle.templatePoints = built.points;
     state.cycle.metrics = built.metrics;
+    state.cycle.workingFluid = built.fluid || null;
     setCycleStatus(`Loaded template: ${CYCLE_TEMPLATES.find((t) => t.id === templateId)?.label || templateId}.`, "ok");
+    setCycleInputMessage("Cycle solved from current inputs.", "ok");
   } catch (error) {
     state.cycle.templatePoints = [];
     state.cycle.metrics = [];
+    state.cycle.workingFluid = null;
     setCycleStatus(error.message, "error");
+    setCycleInputMessage(error.message, "error");
   }
 
   renderCyclePanel();
@@ -2876,6 +3331,25 @@ function clearManualPoints() {
   setCycleStatus("Manual points cleared.");
   renderCyclePanel();
 }
+
+function solveCycleFromForm() {
+  const templateId = state.cycle.templateId;
+  const schema = cycleInputSchema(templateId);
+  if (schema.length === 0) {
+    loadCycleTemplate(templateId);
+    return;
+  }
+
+  try {
+    const inputs = readCycleInputsFromForm(templateId);
+    state.cycle.templateInputs[templateId] = mergeCycleInputs(templateId, inputs);
+    loadCycleTemplate(templateId, state.cycle.templateInputs[templateId]);
+  } catch (error) {
+    setCycleInputMessage(error.message, "error");
+    setCycleStatus(error.message, "warn");
+  }
+}
+
 function wireLookupEvents() {
   el.fluidFilter.addEventListener("change", applyTableFilters);
   el.modeFilter.addEventListener("change", applyTableFilters);
@@ -2894,11 +3368,27 @@ function wireCycleEvents() {
 
   el.cycleTemplateSelect.addEventListener("change", () => {
     state.cycle.templateId = el.cycleTemplateSelect.value;
+    if (!state.cycle.templateInputs[state.cycle.templateId]) {
+      state.cycle.templateInputs[state.cycle.templateId] = defaultCycleInputs(state.cycle.templateId);
+    }
+    renderCycleInputFields(state.cycle.templateId);
+    loadCycleTemplate(state.cycle.templateId, state.cycle.templateInputs[state.cycle.templateId]);
   });
 
   el.loadTemplateBtn.addEventListener("click", () => {
-    loadCycleTemplate(el.cycleTemplateSelect.value);
+    const templateId = el.cycleTemplateSelect.value;
+    const defaults = defaultCycleInputs(templateId);
+    state.cycle.templateInputs[templateId] = defaults;
+    renderCycleInputFields(templateId);
+    loadCycleTemplate(templateId, defaults);
   });
+
+  if (el.cycleInputForm) {
+    el.cycleInputForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      solveCycleFromForm();
+    });
+  }
 
   el.toggleDome.addEventListener("change", () => {
     state.cycle.domeVisible = el.toggleDome.checked;
@@ -2939,7 +3429,11 @@ async function loadDataset() {
     setWorkflowStatus(`Workflow ready: ${workflowTypeLabel(state.workflow.type)}.`);
 
     populateCycleTemplateSelect();
-    loadCycleTemplate(state.cycle.templateId);
+    if (!state.cycle.templateInputs[state.cycle.templateId]) {
+      state.cycle.templateInputs[state.cycle.templateId] = defaultCycleInputs(state.cycle.templateId);
+    }
+    renderCycleInputFields(state.cycle.templateId);
+    loadCycleTemplate(state.cycle.templateId, state.cycle.templateInputs[state.cycle.templateId]);
 
     renderSessionStats();
     renderHistoryTable();
@@ -2953,6 +3447,7 @@ async function loadDataset() {
       "error",
     );
     setWorkflowStatus("Workflow panel unavailable until dataset is loaded.", "error");
+    setCycleInputMessage("Cycle inputs unavailable until dataset is loaded.", "error");
     setCycleStatus("Cycle plotter unavailable until dataset is loaded.", "error");
   } finally {
     setLookupLoading(false);

@@ -24,6 +24,7 @@ ThermoLookup is a thermodynamic property interpolation tool for mechanical engin
   - `Isentropic Turbine / Compressor` with reverse lookup (`P + s`) and efficiency correction
   - `Property Differences` (`Delta h`, `Delta s`, `Delta u`, `Delta v`) between two states
 - Adds sanity warnings for common mistakes (for example `x` outside `0..1`, non-physical pressure, and suspicious irreversible-process trends)
+- Cycle templates now support user-entered inputs (pressures, temperatures, efficiencies) instead of fixed hardcoded defaults
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app
 

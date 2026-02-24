@@ -214,7 +214,14 @@
 
             <label for="cycleTemplateSelect">Template</label>
             <select id="cycleTemplateSelect"></select>
-            <button type="button" id="loadTemplateBtn">Load Template</button>
+            <button type="button" id="loadTemplateBtn">Load Defaults</button>
+
+            <form id="cycleInputForm" class="query-form">
+              <h3>Cycle Inputs</h3>
+              <div id="cycleInputFields"></div>
+              <p class="validation-msg" id="cycleInputMessage"></p>
+              <button type="submit" id="solveCycleBtn">Solve Cycle</button>
+            </form>
 
             <label class="check-label">
               <input type="checkbox" id="toggleDome" checked />
