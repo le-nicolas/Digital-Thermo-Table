@@ -2622,7 +2622,7 @@ function renderCyclePlot() {
   const height = canvas.height;
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#0a1019";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
 
   const diagram = state.cycle.diagram;
@@ -2645,7 +2645,7 @@ function renderCyclePlot() {
   const allPoints = [...domePoints, ...isobarPoints, ...templateMapped, ...manualMapped];
 
   if (allPoints.length === 0) {
-    ctx.fillStyle = "#8ea2b9";
+    ctx.fillStyle = "#6b7280";
     ctx.font = "16px Space Grotesk";
     ctx.fillText("No plot data available for this view.", 36, 60);
     return;
@@ -2689,7 +2689,7 @@ function renderCyclePlot() {
     return { x: cx, y: cy };
   };
 
-  ctx.strokeStyle = "#213349";
+  ctx.strokeStyle = "#e5e7eb";
   ctx.lineWidth = 1;
   const gridLines = 6;
 
@@ -2708,7 +2708,7 @@ function renderCyclePlot() {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = "#4b6a8f";
+  ctx.strokeStyle = "#cfd4dc";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.moveTo(margin.left, margin.top);
@@ -2716,7 +2716,7 @@ function renderCyclePlot() {
   ctx.lineTo(margin.left + plotW, margin.top + plotH);
   ctx.stroke();
 
-  ctx.fillStyle = "#8ea2b9";
+  ctx.fillStyle = "#6b7280";
   ctx.font = "11px JetBrains Mono";
 
   for (let i = 0; i <= gridLines; i += 1) {
@@ -2732,7 +2732,7 @@ function renderCyclePlot() {
 
   const xLabel = diagram === "Ts" ? "s" : diagram === "Ph" ? "h" : "s";
   const yLabel = diagram === "Ts" ? "T" : diagram === "Ph" ? "P (log)" : "h";
-  ctx.fillStyle = "#c2d2e3";
+  ctx.fillStyle = "#374151";
   ctx.font = "12px JetBrains Mono";
   ctx.fillText(`X: ${xLabel}`, margin.left + plotW / 2 - 22, height - 16);
   ctx.save();
@@ -2758,18 +2758,18 @@ function renderCyclePlot() {
   };
 
   if (state.cycle.domeVisible) {
-    drawPolyline(dome.liquid, "#39d1ff", 2.2);
-    drawPolyline(dome.vapor, "#39d1ff", 2.2);
+    drawPolyline(dome.liquid, "#22b8cf", 2.2);
+    drawPolyline(dome.vapor, "#22b8cf", 2.2);
   }
 
   if (state.cycle.isobarsVisible) {
     for (const curve of isobars) {
-      drawPolyline(curve.points, "rgba(255, 209, 102, 0.45)", 1.1);
+      drawPolyline(curve.points, "rgba(15, 138, 106, 0.28)", 1.1);
     }
   }
 
   if (templateMapped.length >= 2) {
-    ctx.strokeStyle = "#ff8f2b";
+    ctx.strokeStyle = "#10a37f";
     ctx.lineWidth = 2.6;
     ctx.beginPath();
     const first = toCanvas(templateMapped[0].x, templateMapped[0].y);
@@ -2792,20 +2792,20 @@ function renderCyclePlot() {
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = "#e8eef7";
+    ctx.fillStyle = "#1a1d21";
     ctx.font = "11px JetBrains Mono";
     ctx.fillText(point.label || "", pos.x + 6, pos.y - 6);
   };
 
   for (const point of templateMapped) {
-    drawPoint(point, "#ff8f2b", "#ffd7a9");
+    drawPoint(point, "#10a37f", "#5bc9ab");
   }
 
   for (const point of manualMapped) {
-    drawPoint(point, "#ff4f9a", "#ffc7e0");
+    drawPoint(point, "#64748b", "#cbd5e1");
   }
 
-  ctx.fillStyle = "#8ea2b9";
+  ctx.fillStyle = "#6b7280";
   ctx.font = "11px JetBrains Mono";
   ctx.fillText(`Diagram: ${diagram}`, margin.left, margin.top - 8);
 }
