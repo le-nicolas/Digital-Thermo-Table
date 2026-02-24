@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ThermoLookup — Interpolation Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0f10;
+    --surface: #141618;
+    --surface2: #1c1f22;
+    --border: #2a2e33;
+    --accent: #f59e0b;
+    --accent2: #fbbf24;
+    --accent-dim: rgba(245,158,11,0.12);
+    --text: #e8eaed;
+    --text-dim: #6b7280;
+    --text-mid: #9ca3af;
+    --green: #34d399;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── LANDING ── */
+  #landing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    gap: 32px;
+    padding: 40px 20px;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(245,158,11,0.06) 0%, transparent 70%),
+      repeating-linear-gradient(0deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px);
+  }
+
+  .landing-header {
+    text-align: center;
+  }
+
+  .landing-header .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .landing-header h1 {
+    font-family: var(--mono);
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1.1;
+  }
+
+  .landing-header h1 span { color: var(--accent); }
+
+  .landing-header p {
+    margin-top: 16px;
+    color: var(--text-mid);
+    font-size: 15px;
+    max-width: 480px;
+    line-height: 1.6;
+  }
+
+  .capabilities {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 560px;
+  }
+
+  .cap-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-mid);
+    background: var(--surface);
+    letter-spacing: 0.05em;
+  }
+  .cap-badge.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+  .load-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 40px 60px;
+    border: 2px dashed var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface);
+    max-width: 400px;
+    width: 100%;
+  }
+
+  .load-zone:hover, .load-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  .load-zone svg { color: var(--accent); }
+
+  .load-zone .load-label {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-mid);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .load-zone .load-label strong { color: var(--text); display: block; margin-bottom: 4px; }
+
+  #fileInput { display: none; }
+
+  .hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── APP LAYOUT ── */
+  #app {
+    display: none;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  .app-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .app-header .logo {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--accent);
+    letter-spacing: -0.01em;
+  }
+
+  .app-header .filename {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 3px 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+  }
+
+  .app-header .spacer { flex: 1; }
+
+  .btn-sm {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--text-mid);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.04em;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+
+  .app-body {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-section h3 {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  .sheet-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+  }
+
+  .sheet-item:hover { background: var(--surface2); }
+  .sheet-item.active { background: var(--accent-dim); border-color: var(--accent); }
+
+  .sheet-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .sheet-dot.configured { background: var(--green); }
+
+  .sheet-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-mid);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sheet-item.active .sheet-name { color: var(--accent); }
+
+  .sheet-type-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 2px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+  .sheet-item.active .sheet-type-badge { background: var(--accent); color: var(--bg); }
+
+  /* CONFIG PANEL */
+  .config-panel {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: none;
+  }
+  .config-panel.visible { display: block; }
+
+  .config-panel h3 {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    letter-spacing: 0.05em;
+  }
+
+  select, input[type="text"], input[type="number"] {
+    width: 100%;
+    padding: 7px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    margin-bottom: 10px;
+    transition: border-color 0.15s;
+    appearance: none;
+  }
+
+  select:focus, input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  select option { background: var(--surface); }
+
+  .col-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .col-item { margin-bottom: 0; }
+  .col-item label { font-size: 10px; margin-bottom: 2px; }
+  .col-item select { margin-bottom: 0; font-size: 11px; }
+
+  .btn-primary {
+    width: 100%;
+    padding: 9px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-top: 6px;
+  }
+  .btn-primary:hover { background: var(--accent2); }
+
+  /* ── MAIN CONTENT ── */
+  .main-content {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+
+  .query-panel {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .query-panel h2 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-mid);
+    margin-bottom: 16px;
+    letter-spacing: 0.05em;
+  }
+
+  .query-panel h2 span { color: var(--accent); }
+
+  .query-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .query-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 160px;
+    flex: 1;
+  }
+
+  .query-field label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0;
+  }
+
+  .query-field input, .query-field select {
+    margin-bottom: 0;
+    font-size: 14px;
+    padding: 10px 12px;
+    border-color: var(--surface2);
+  }
+
+  .btn-query {
+    padding: 10px 28px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    height: 44px;
+    align-self: flex-end;
+  }
+  .btn-query:hover { background: var(--accent2); transform: translateY(-1px); }
+
+  .no-sheet-msg {
+    padding: 20px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    display: none;
+  }
+
+  /* ── RESULTS ── */
+  .results-panel {
+    padding: 24px;
+    flex: 1;
+  }
+
+  .results-panel h2 {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+
+  #resultsContainer { display: none; }
+
+  .result-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px;
+    transition: border-color 0.2s;
+    animation: fadeUp 0.3s ease both;
+  }
+
+  .result-card:hover { border-color: var(--accent); }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .result-card .rc-prop {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    letter-spacing: 0.05em;
+  }
+
+  .result-card .rc-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .result-card .rc-unit {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  /* WORK SHOWN */
+  .work-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .work-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .work-header span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .work-header .toggle-icon {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+  }
+  .work-header.open .toggle-icon { transform: rotate(180deg); }
+
+  .work-body {
+    padding: 16px;
+    display: none;
+  }
+  .work-body.open { display: block; }
+
+  .work-step {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+    animation: fadeUp 0.3s ease both;
+  }
+
+  .step-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .step-content {
+    flex: 1;
+  }
+
+  .step-content .step-title {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+
+  .step-content .step-detail {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.7;
+    background: var(--bg);
+    padding: 8px 12px;
+    border-radius: 2px;
+    border-left: 2px solid var(--accent);
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .error-box {
+    padding: 14px 16px;
+    background: rgba(248,113,113,0.08);
+    border: 1px solid rgba(248,113,113,0.3);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--red);
+    display: none;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty-state .big-icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-state p { font-family: var(--mono); font-size: 12px; line-height: 1.7; }
+
+  /* RESPONSIVE */
+  @media (max-width: 700px) {
+    .app-body { grid-template-columns: 1fr; }
+    .sidebar { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
+  }
+
+  .tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tag { font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 2px; border: 1px solid var(--border); color: var(--text-dim); }
+  .tag.t { border-color: #60a5fa; color: #60a5fa; }
+  .tag.p { border-color: #34d399; color: #34d399; }
+  .tag.h { border-color: #f59e0b; color: #f59e0b; }
+</style>
+</head>
+<body>
+
+<!-- LANDING -->
+<div id="landing">
+  <div class="landing-header">
+    <div class="eyebrow">// Mechanical Engineering Utility</div>
+    <h1>Thermo<span>Lookup</span></h1>
+    <p>Load your Excel thermodynamic tables, configure each sheet, and get interpolated property values instantly — with full calculation steps shown.</p>
+  </div>
+
+  <div class="capabilities">
+    <span class="cap-badge active">Steam / Water</span>
+    <span class="cap-badge active">Refrigerants</span>
+    <span class="cap-badge active">Ideal Gas</span>
+    <span class="cap-badge">1D Interpolation</span>
+    <span class="cap-badge">Bilinear Interp.</span>
+    <span class="cap-badge">Shows Work</span>
+  </div>
+
+  <div class="load-zone" id="loadZone">
+    <svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+      <path d="M12 16V4m0 0L8 8m4-4 4 4M4 20h16" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="load-label">
+      <strong>Drop your Excel file here</strong>
+      Click to browse — .xlsx, .xls, .csv
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+  </div>
+
+  <div class="hint">// Works 100% offline — your data never leaves your machine</div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <div class="app-header">
+    <div class="logo">ThermoLookup</div>
+    <div class="filename" id="headerFilename">—</div>
+    <div class="spacer"></div>
+    <button class="btn-sm" onclick="resetApp()">↩ Load New File</button>
+  </div>
+
+  <div class="app-body">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <h3>// Sheets</h3>
+        <div id="sheetList"></div>
+      </div>
+
+      <div class="config-panel" id="configPanel">
+        <h3>// Configure Sheet</h3>
+
+        <label>TABLE TYPE</label>
+        <select id="cfgType" onchange="onTypeChange()">
+          <option value="">— select —</option>
+          <option value="sat-T">Saturated (by Temperature)</option>
+          <option value="sat-P">Saturated (by Pressure)</option>
+          <option value="superheated">Superheated (T + P)</option>
+          <option value="ideal-gas">Ideal Gas / Air (by T)</option>
+          <option value="subcooled">Compressed/Subcooled Liquid</option>
+        </select>
+
+        <div id="colMappingWrap">
+          <label style="margin-bottom:8px;">COLUMN MAPPING</label>
+          <div id="colMapping" class="col-grid"></div>
+        </div>
+
+        <div id="unitHints" style="margin-top:8px;"></div>
+
+        <button class="btn-primary" onclick="saveConfig()">✓ Apply Configuration</button>
+      </div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main-content">
+      <div class="query-panel" id="queryPanel">
+        <h2>// Query — <span id="querySheetName">select a sheet</span></h2>
+        <div id="noSheetMsg" class="no-sheet-msg" style="display:block;">
+          <p>← Select and configure a sheet to begin querying.</p>
+        </div>
+        <div id="queryFields" style="display:none;">
+          <div class="query-row" id="queryRow"></div>
+          <div id="errorBox" class="error-box"></div>
+        </div>
+      </div>
+
+      <div class="results-panel">
+        <h2>// Results</h2>
+        <div class="empty-state" id="emptyState">
+          <div class="big-icon">⟨ ⟩</div>
+          <p>Enter input values above and hit<br><strong style="color:var(--text-mid)">INTERPOLATE</strong><br>to see results with full working steps.</p>
+        </div>
+        <div id="resultsContainer">
+          <div class="tag-row" id="resultTags"></div>
+          <div class="result-grid" id="resultGrid"></div>
+          <div class="work-section" id="workSection">
+            <div class="work-header" id="workToggle" onclick="toggleWork()">
+              <span>▸ Interpolation Work</span>
+              <span class="toggle-icon">▾</span>
+            </div>
+            <div class="work-body" id="workBody"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let state = {
+  filename: '',
+  rawSheets: {},        // sheetName → array of row objects
+  configs: {},          // sheetName → { type, cols }
+  activeSheet: null
+};
+
+// Property definitions
+const PROPS = {
+  T:    { label: 'T',    unit: '°C / K',  desc: 'Temperature' },
+  P:    { label: 'P',    unit: 'kPa',     desc: 'Pressure' },
+  v:    { label: 'v',    unit: 'm³/kg',   desc: 'Specific Volume' },
+  vf:   { label: 'vf',   unit: 'm³/kg',   desc: 'Spec. Vol. (liquid)' },
+  vg:   { label: 'vg',   unit: 'm³/kg',   desc: 'Spec. Vol. (vapor)' },
+  vfg:  { label: 'vfg',  unit: 'm³/kg',   desc: 'Spec. Vol. (evap.)' },
+  u:    { label: 'u',    unit: 'kJ/kg',   desc: 'Internal Energy' },
+  uf:   { label: 'uf',   unit: 'kJ/kg',   desc: 'Int. Energy (liquid)' },
+  ug:   { label: 'ug',   unit: 'kJ/kg',   desc: 'Int. Energy (vapor)' },
+  ufg:  { label: 'ufg',  unit: 'kJ/kg',   desc: 'Int. Energy (evap.)' },
+  h:    { label: 'h',    unit: 'kJ/kg',   desc: 'Enthalpy' },
+  hf:   { label: 'hf',   unit: 'kJ/kg',   desc: 'Enthalpy (liquid)' },
+  hg:   { label: 'hg',   unit: 'kJ/kg',   desc: 'Enthalpy (vapor)' },
+  hfg:  { label: 'hfg',  unit: 'kJ/kg',   desc: 'Enthalpy (evap.)' },
+  s:    { label: 's',    unit: 'kJ/kg·K', desc: 'Entropy' },
+  sf:   { label: 'sf',   unit: 'kJ/kg·K', desc: 'Entropy (liquid)' },
+  sg:   { label: 'sg',   unit: 'kJ/kg·K', desc: 'Entropy (vapor)' },
+  sfg:  { label: 'sfg',  unit: 'kJ/kg·K', desc: 'Entropy (evap.)' },
+  Pr:   { label: 'Pr',   unit: '—',       desc: 'Prandtl Number' },
+  h_bar:{ label: 'h̄',   unit: 'kJ/kmol', desc: 'Molar Enthalpy' },
+  cv:   { label: 'cv',   unit: 'kJ/kg·K', desc: 'Spec. Heat (const. v)' },
+  cp:   { label: 'cp',   unit: 'kJ/kg·K', desc: 'Spec. Heat (const. p)' },
+  k:    { label: 'k',    unit: '—',       desc: 'Ratio of Spec. Heats' },
+};
+
+const TYPE_COLS = {
+  'sat-T':      { index: 'T', props: ['vf','vg','uf','ug','hf','hfg','hg','sf','sfg','sg','P'] },
+  'sat-P':      { index: 'P', props: ['T','vf','vg','uf','ug','hf','hfg','hg','sf','sfg','sg'] },
+  'superheated':{ index: ['T','P'], props: ['v','u','h','s'] },
+  'ideal-gas':  { index: 'T', props: ['h','u','s','Pr','vr','cv','cp','k'] },
+  'subcooled':  { index: ['T','P'], props: ['v','u','h','s'] },
+};
+
+// ═══════════════════════════════════════════════════════════
+//  FILE LOADING
+// ═══════════════════════════════════════════════════════════
+document.getElementById('loadZone').addEventListener('click', () =>
+  document.getElementById('fileInput').click());
+
+document.getElementById('loadZone').addEventListener('dragover', e => {
+  e.preventDefault();
+  document.getElementById('loadZone').classList.add('drag-over');
+});
+document.getElementById('loadZone').addEventListener('dragleave', () =>
+  document.getElementById('loadZone').classList.remove('drag-over'));
+document.getElementById('loadZone').addEventListener('drop', e => {
+  e.preventDefault();
+  document.getElementById('loadZone').classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+document.getElementById('fileInput').addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  state.filename = file.name;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const data = new Uint8Array(ev.target.result);
+    const wb = XLSX.read(data, { type: 'array' });
+    state.rawSheets = {};
+    state.configs = {};
+
+    wb.SheetNames.forEach(name => {
+      const ws = wb.Sheets[name];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (rows.length > 0) {
+        state.rawSheets[name] = rows;
+        // Auto-detect config
+        state.configs[name] = autoDetect(name, rows);
+      }
+    });
+
+    launchApp();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function autoDetect(name, rows) {
+  const headers = Object.keys(rows[0]).map(h => h.trim().toLowerCase());
+  const nameLow = name.toLowerCase();
+
+  // Guess table type from sheet name
+  let type = '';
+  if (nameLow.includes('sup') || nameLow.includes('superheat')) type = 'superheated';
+  else if (nameLow.includes('sat') && (nameLow.includes('temp') || nameLow.includes('-t'))) type = 'sat-T';
+  else if (nameLow.includes('sat') && nameLow.includes('press')) type = 'sat-P';
+  else if (nameLow.includes('air') || nameLow.includes('gas') || nameLow.includes('ideal')) type = 'ideal-gas';
+  else if (nameLow.includes('comp') || nameLow.includes('sub')) type = 'subcooled';
+  else if (headers.includes('p') || headers.includes('pressure')) {
+    if (headers.includes('t') || headers.includes('temp')) type = 'superheated';
+    else type = 'sat-P';
+  } else type = 'sat-T';
+
+  // Auto map columns
+  const cols = {};
+  const clean = h => h.replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+  Object.keys(rows[0]).forEach(rawH => {
+    const c = clean(rawH);
+    // T
+    if (['t','temp','temperature','tsat','tsatc'].includes(c)) cols.T = rawH;
+    // P
+    else if (['p','pres','pressure','psat','pkpa','pmpa'].includes(c)) cols.P = rawH;
+    // v props
+    else if (c === 'v') cols.v = rawH;
+    else if (['vf','vliq','vf(m3kg)'].includes(c)) cols.vf = rawH;
+    else if (['vg','vvap','vg(m3kg)'].includes(c)) cols.vg = rawH;
+    else if (['vfg'].includes(c)) cols.vfg = rawH;
+    // u props
+    else if (c === 'u') cols.u = rawH;
+    else if (['uf'].includes(c)) cols.uf = rawH;
+    else if (['ug'].includes(c)) cols.ug = rawH;
+    else if (['ufg'].includes(c)) cols.ufg = rawH;
+    // h props
+    else if (c === 'h') cols.h = rawH;
+    else if (['hf'].includes(c)) cols.hf = rawH;
+    else if (['hg'].includes(c)) cols.hg = rawH;
+    else if (['hfg'].includes(c)) cols.hfg = rawH;
+    // s props
+    else if (c === 's') cols.s = rawH;
+    else if (['sf'].includes(c)) cols.sf = rawH;
+    else if (['sg'].includes(c)) cols.sg = rawH;
+    else if (['sfg'].includes(c)) cols.sfg = rawH;
+    // others
+    else if (['pr','prandtl'].includes(c)) cols.Pr = rawH;
+    else if (['vr'].includes(c)) cols.vr = rawH;
+    else if (['cv'].includes(c)) cols.cv = rawH;
+    else if (['cp'].includes(c)) cols.cp = rawH;
+    else if (['k','gamma'].includes(c)) cols.k = rawH;
+  });
+
+  return { type, cols };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  APP INITIALIZATION
+// ═══════════════════════════════════════════════════════════
+function launchApp() {
+  document.getElementById('landing').style.display = 'none';
+  const app = document.getElementById('app');
+  app.style.display = 'flex';
+  document.getElementById('headerFilename').textContent = state.filename;
+  renderSheetList();
+}
+
+function resetApp() {
+  state = { filename: '', rawSheets: {}, configs: {}, activeSheet: null };
+  document.getElementById('landing').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('fileInput').value = '';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SIDEBAR
+// ═══════════════════════════════════════════════════════════
+function renderSheetList() {
+  const list = document.getElementById('sheetList');
+  list.innerHTML = '';
+
+  Object.keys(state.rawSheets).forEach(name => {
+    const cfg = state.configs[name];
+    const isActive = name === state.activeSheet;
+    const isConfigured = cfg && cfg.type;
+
+    const item = document.createElement('div');
+    item.className = 'sheet-item' + (isActive ? ' active' : '');
+    item.onclick = () => selectSheet(name);
+    item.innerHTML = `
+      <span class="sheet-dot${isConfigured ? ' configured' : ''}"></span>
+      <span class="sheet-name">${name}</span>
+      <span class="sheet-type-badge">${cfg?.type ? cfg.type.replace('sat-','sat/') : '?'}</span>
+    `;
+    list.appendChild(item);
+  });
+}
+
+function selectSheet(name) {
+  state.activeSheet = name;
+  renderSheetList();
+  renderConfig(name);
+  renderQueryPanel(name);
+  hideResults();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONFIG PANEL
+// ═══════════════════════════════════════════════════════════
+function renderConfig(name) {
+  const panel = document.getElementById('configPanel');
+  panel.classList.add('visible');
+
+  const cfg = state.configs[name] || { type: '', cols: {} };
+  document.getElementById('cfgType').value = cfg.type || '';
+  renderColMapping(name);
+}
+
+function onTypeChange() {
+  renderColMapping(state.activeSheet);
+}
+
+function renderColMapping(name) {
+  const type = document.getElementById('cfgType').value;
+  if (!type || !name) return;
+
+  const cfg = state.configs[name] || { cols: {} };
+  const rows = state.rawSheets[name] || [];
+  const headers = rows.length ? Object.keys(rows[0]) : [];
+  const propList = TYPE_COLS[type];
+  if (!propList) return;
+
+  const allCols = [type === 'superheated' || type === 'subcooled'
+    ? ['T','P'] : [propList.index], ...propList.props.map(p => p)].flat();
+
+  const wrap = document.getElementById('colMapping');
+  wrap.innerHTML = '';
+
+  const noneOpt = `<option value="">— none —</option>`;
+
+  allCols.forEach(prop => {
+    const div = document.createElement('div');
+    div.className = 'col-item';
+    const currentVal = cfg.cols?.[prop] || '';
+    const opts = headers.map(h =>
+      `<option value="${h}" ${currentVal === h ? 'selected' : ''}>${h}</option>`
+    ).join('');
+    div.innerHTML = `
+      <label>${prop}</label>
+      <select id="col_${prop}" style="margin-bottom:0;">${noneOpt}${opts}</select>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+function saveConfig() {
+  const name = state.activeSheet;
+  if (!name) return;
+  const type = document.getElementById('cfgType').value;
+  if (!type) { alert('Please select a table type.'); return; }
+
+  const propList = TYPE_COLS[type];
+  const allCols = type === 'superheated' || type === 'subcooled'
+    ? ['T','P', ...propList.props] : [propList.index, ...propList.props];
+
+  const cols = {};
+  allCols.forEach(prop => {
+    const el = document.getElementById('col_' + prop);
+    if (el && el.value) cols[prop] = el.value;
+  });
+
+  state.configs[name] = { type, cols };
+  renderSheetList();
+  renderQueryPanel(name);
+  hideResults();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  QUERY PANEL
+// ═══════════════════════════════════════════════════════════
+function renderQueryPanel(name) {
+  const cfg = state.configs[name];
+  const noMsg = document.getElementById('noSheetMsg');
+  const qFields = document.getElementById('queryFields');
+  const qName = document.getElementById('querySheetName');
+  qName.textContent = name;
+
+  if (!cfg || !cfg.type) {
+    noMsg.style.display = 'block';
+    qFields.style.display = 'none';
+    return;
+  }
+
+  noMsg.style.display = 'none';
+  qFields.style.display = 'block';
+
+  const row = document.getElementById('queryRow');
+  row.innerHTML = '';
+  document.getElementById('errorBox').style.display = 'none';
+
+  if (cfg.type === 'superheated' || cfg.type === 'subcooled') {
+    addQueryField(row, 'T', 'Temperature (°C or K)', 'number', 'q_T');
+    addQueryField(row, 'P', 'Pressure (kPa)', 'number', 'q_P');
+  } else if (cfg.type === 'sat-T' || cfg.type === 'ideal-gas') {
+    addQueryField(row, 'T', 'Temperature (°C or K)', 'number', 'q_T');
+  } else if (cfg.type === 'sat-P') {
+    addQueryField(row, 'P', 'Pressure (kPa)', 'number', 'q_P');
+  }
+
+  // Button
+  const btn = document.createElement('button');
+  btn.className = 'btn-query';
+  btn.textContent = 'INTERPOLATE';
+  btn.onclick = performQuery;
+  row.appendChild(btn);
+}
+
+function addQueryField(container, prop, placeholder, type, id) {
+  const div = document.createElement('div');
+  div.className = 'query-field';
+  div.innerHTML = `
+    <label>${prop} — ${placeholder}</label>
+    <input type="${type}" id="${id}" placeholder="e.g. ${prop === 'T' ? '250' : '500'}" step="any">
+  `;
+  container.appendChild(div);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INTERPOLATION ENGINE
+// ═══════════════════════════════════════════════════════════
+function lerp(x, x1, x2, y1, y2) {
+  return y1 + (x - x1) / (x2 - x1) * (y2 - y1);
+}
+
+function findBracket(data, col, val) {
+  // Returns [i_low, i_high] or null
+  const vals = data.map(r => parseFloat(r[col])).filter(v => !isNaN(v));
+  const isAsc = vals[vals.length - 1] > vals[0];
+
+  for (let i = 0; i < data.length - 1; i++) {
+    const v1 = parseFloat(data[i][col]);
+    const v2 = parseFloat(data[i+1][col]);
+    if (isNaN(v1) || isNaN(v2)) continue;
+    if ((v1 <= val && val <= v2) || (v2 <= val && val <= v1)) {
+      return [i, i+1];
+    }
+  }
+  return null;
+}
+
+function interp1D(data, indexCol, inputVal, targetCols, steps) {
+  const numVal = parseFloat(inputVal);
+  if (isNaN(numVal)) throw new Error(`Invalid input: "${inputVal}"`);
+
+  // Check exact match
+  for (let i = 0; i < data.length; i++) {
+    if (Math.abs(parseFloat(data[i][indexCol]) - numVal) < 1e-9) {
+      steps.push({
+        title: 'Exact match found',
+        detail: `${indexCol} = ${numVal} matches row ${i+1} exactly. No interpolation needed.`
+      });
+      const result = {};
+      targetCols.forEach(c => {
+        if (data[i][c] !== undefined && data[i][c] !== '')
+          result[c] = parseFloat(data[i][c]);
+      });
+      return result;
+    }
+  }
+
+  const bracket = findBracket(data, indexCol, numVal);
+  if (!bracket) {
+    throw new Error(`${indexCol} = ${numVal} is outside the table range. ` +
+      `Table range: ${parseFloat(data[0][indexCol])} – ${parseFloat(data[data.length-1][indexCol])}`);
+  }
+
+  const [i1, i2] = bracket;
+  const x1 = parseFloat(data[i1][indexCol]);
+  const x2 = parseFloat(data[i2][indexCol]);
+
+  steps.push({
+    title: `Bracket found`,
+    detail: `${indexCol}\u2081 = ${x1}   (row ${i1+1})\n${indexCol}\u2082 = ${x2}   (row ${i2+1})\n\nInput ${indexCol} = ${numVal} lies between these rows.`
+  });
+
+  const fraction = (numVal - x1) / (x2 - x1);
+  steps.push({
+    title: `Interpolation fraction`,
+    detail: `\u03B1 = (${numVal} \u2212 ${x1}) / (${x2} \u2212 ${x1})\n   = ${(numVal-x1).toPrecision(6)} / ${(x2-x1).toPrecision(6)}\n   = ${fraction.toPrecision(6)}`
+  });
+
+  const result = {};
+  const propDetails = [];
+
+  targetCols.forEach(c => {
+    const v1 = parseFloat(data[i1][c]);
+    const v2 = parseFloat(data[i2][c]);
+    if (isNaN(v1) || isNaN(v2)) return;
+    const val = lerp(numVal, x1, x2, v1, v2);
+    result[c] = val;
+    propDetails.push(`${c.padEnd(6)} = ${v1} + ${fraction.toPrecision(4)} × (${v2} \u2212 ${v1}) = ${val.toPrecision(7)}`);
+  });
+
+  steps.push({
+    title: `Linear interpolation: y = y\u2081 + \u03B1(y\u2082 \u2212 y\u2081)`,
+    detail: propDetails.join('\n')
+  });
+
+  return result;
+}
+
+function interp2D(data, colT, colP, inputT, inputP, targetCols, steps) {
+  const T = parseFloat(inputT);
+  const P = parseFloat(inputP);
+  if (isNaN(T) || isNaN(P)) throw new Error('Invalid T or P input.');
+
+  // Get unique pressures
+  const pressures = [...new Set(data.map(r => parseFloat(r[colP])).filter(v => !isNaN(v)))].sort((a,b) => a-b);
+
+  if (pressures.length < 2) {
+    // Only one pressure — treat as 1D on T
+    steps.push({ title: 'Single pressure detected', detail: 'Only one pressure in table. Interpolating on T only.' });
+    const subset = data.filter(r => !isNaN(parseFloat(r[colP])));
+    return interp1D(subset, colT, T, targetCols, steps);
+  }
+
+  // Find P bracket
+  let P1 = null, P2 = null;
+  for (let i = 0; i < pressures.length - 1; i++) {
+    if (pressures[i] <= P && P <= pressures[i+1]) {
+      P1 = pressures[i]; P2 = pressures[i+1]; break;
+    }
+  }
+  if (P1 === null) throw new Error(`P = ${P} is outside the table pressure range (${pressures[0]} – ${pressures[pressures.length-1]}).`);
+
+  steps.push({
+    title: 'Pressure bracket',
+    detail: `P\u2081 = ${P1} kPa\nP\u2082 = ${P2} kPa\nInput P = ${P} kPa`
+  });
+
+  // Subset by P1 and P2
+  const dataP1 = data.filter(r => Math.abs(parseFloat(r[colP]) - P1) < 1e-6);
+  const dataP2 = data.filter(r => Math.abs(parseFloat(r[colP]) - P2) < 1e-6);
+
+  steps.push({ title: `Interpolate on T at P = ${P1}`, detail: `Using ${dataP1.length} rows at P = ${P1}` });
+  const stepsP1 = [];
+  const resP1 = interp1D(dataP1, colT, T, targetCols, stepsP1);
+  stepsP1.forEach(s => steps.push(s));
+
+  steps.push({ title: `Interpolate on T at P = ${P2}`, detail: `Using ${dataP2.length} rows at P = ${P2}` });
+  const stepsP2 = [];
+  const resP2 = interp1D(dataP2, colT, T, targetCols, stepsP2);
+  stepsP2.forEach(s => steps.push(s));
+
+  // Interpolate on P
+  const alphaP = (P - P1) / (P2 - P1);
+  steps.push({
+    title: `Final interpolation on P`,
+    detail: `\u03B1P = (${P} \u2212 ${P1}) / (${P2} \u2212 ${P1}) = ${alphaP.toPrecision(6)}`
+  });
+
+  const result = {};
+  const finalDetails = [];
+  targetCols.forEach(c => {
+    if (resP1[c] !== undefined && resP2[c] !== undefined) {
+      const val = resP1[c] + alphaP * (resP2[c] - resP1[c]);
+      result[c] = val;
+      finalDetails.push(`${c.padEnd(6)} = ${resP1[c].toPrecision(6)} + ${alphaP.toPrecision(4)} × (${resP2[c].toPrecision(6)} \u2212 ${resP1[c].toPrecision(6)}) = ${val.toPrecision(7)}`);
+    }
+  });
+  steps.push({ title: 'Bilinear result', detail: finalDetails.join('\n') });
+
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  QUERY EXECUTION
+// ═══════════════════════════════════════════════════════════
+function performQuery() {
+  const name = state.activeSheet;
+  const cfg = state.configs[name];
+  const data = state.rawSheets[name];
+  const errBox = document.getElementById('errorBox');
+  errBox.style.display = 'none';
+
+  try {
+    const cols = cfg.cols;
+    const propList = TYPE_COLS[cfg.type];
+    const targetCols = propList.props.map(p => cols[p]).filter(Boolean);
+
+    const steps = [];
+    let results = {};
+    let inputLabel = '';
+
+    if (cfg.type === 'superheated' || cfg.type === 'subcooled') {
+      const T = document.getElementById('q_T')?.value;
+      const P = document.getElementById('q_P')?.value;
+      if (!T || !P) throw new Error('Please enter both T and P.');
+      inputLabel = `T = ${T}, P = ${P}`;
+      steps.push({ title: 'Input values', detail: `Temperature: ${T}\nPressure: ${P}` });
+      results = interp2D(data, cols.T, cols.P, T, P, targetCols, steps);
+    } else {
+      const indexProp = propList.index;
+      const inputEl = document.getElementById(indexProp === 'T' ? 'q_T' : 'q_P');
+      if (!inputEl || !inputEl.value) throw new Error(`Please enter a value for ${indexProp}.`);
+      const inputVal = inputEl.value;
+      inputLabel = `${indexProp} = ${inputVal}`;
+      steps.push({ title: 'Input value', detail: `${indexProp}: ${inputVal}` });
+      results = interp1D(data, cols[indexProp], inputVal, targetCols, steps);
+    }
+
+    renderResults(results, cfg, steps, inputLabel);
+  } catch (e) {
+    errBox.textContent = '⚠ ' + e.message;
+    errBox.style.display = 'block';
+    hideResults();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER RESULTS
+// ═══════════════════════════════════════════════════════════
+function renderResults(results, cfg, steps, inputLabel) {
+  document.getElementById('emptyState').style.display = 'none';
+  const container = document.getElementById('resultsContainer');
+  container.style.display = 'block';
+
+  // Tags
+  const tags = document.getElementById('resultTags');
+  tags.innerHTML = `
+    <span class="tag">${cfg.type}</span>
+    <span class="tag">${state.activeSheet}</span>
+    <span class="tag">${inputLabel}</span>
+    <span class="tag">${Object.keys(results).length} properties</span>
+  `;
+
+  // Cards
+  const grid = document.getElementById('resultGrid');
+  grid.innerHTML = '';
+
+  Object.entries(results).forEach(([rawCol, val], idx) => {
+    // Find prop key by reverse-mapping
+    const propKey = Object.entries(cfg.cols).find(([k,v]) => v === rawCol)?.[0];
+    const meta = PROPS[propKey] || { label: rawCol, unit: '—', desc: rawCol };
+
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    card.style.animationDelay = (idx * 0.04) + 's';
+    card.innerHTML = `
+      <div class="rc-prop">${meta.desc}</div>
+      <div class="rc-value">${isNaN(val) ? '—' : val.toPrecision(6)}</div>
+      <div class="rc-unit">${meta.label} · ${meta.unit}</div>
+    `;
+    grid.appendChild(card);
+  });
+
+  // Work
+  const workBody = document.getElementById('workBody');
+  workBody.innerHTML = '';
+
+  steps.forEach((step, i) => {
+    const div = document.createElement('div');
+    div.className = 'work-step';
+    div.style.animationDelay = (i * 0.05) + 's';
+    div.innerHTML = `
+      <div class="step-num">${i+1}</div>
+      <div class="step-content">
+        <div class="step-title">${step.title}</div>
+        <div class="step-detail">${step.detail}</div>
+      </div>
+    `;
+    workBody.appendChild(div);
+  });
+
+  // Auto-open work section
+  const workToggle = document.getElementById('workToggle');
+  workToggle.classList.add('open');
+  workBody.classList.add('open');
+}
+
+function hideResults() {
+  document.getElementById('emptyState').style.display = 'block';
+  document.getElementById('resultsContainer').style.display = 'none';
+}
+
+function toggleWork() {
+  const toggle = document.getElementById('workToggle');
+  const body = document.getElementById('workBody');
+  toggle.classList.toggle('open');
+  body.classList.toggle('open');
+}
+</script>
+</body>
+</html>
