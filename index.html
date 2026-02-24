@@ -226,20 +226,35 @@
             <form id="cycleInverseForm" class="query-form">
               <h3>Solve Unknown (General)</h3>
 
-              <label for="cycleUnknownSelect">Unknown input</label>
+              <label for="cycleUnknownSelect">Unknown input #1</label>
               <select id="cycleUnknownSelect"></select>
 
-              <label for="cycleTargetMetricSelect">Target metric</label>
+              <label for="cycleTargetMetricSelect">Target metric #1</label>
               <select id="cycleTargetMetricSelect"></select>
 
-              <label for="cycleTargetValue">Target value</label>
+              <label for="cycleTargetValue">Target value #1</label>
               <input id="cycleTargetValue" type="number" step="any" placeholder="For example 0.4 efficiency or 1200 kJ/kg" />
 
-              <label for="cycleSolveMin">Search min (optional)</label>
+              <label for="cycleSolveMin">Search min #1 (optional)</label>
               <input id="cycleSolveMin" type="number" step="any" placeholder="Auto if blank" />
 
-              <label for="cycleSolveMax">Search max (optional)</label>
+              <label for="cycleSolveMax">Search max #1 (optional)</label>
               <input id="cycleSolveMax" type="number" step="any" placeholder="Auto if blank" />
+
+              <label for="cycleUnknownSelect2">Unknown input #2 (optional)</label>
+              <select id="cycleUnknownSelect2"></select>
+
+              <label for="cycleTargetMetricSelect2">Target metric #2 (optional)</label>
+              <select id="cycleTargetMetricSelect2"></select>
+
+              <label for="cycleTargetValue2">Target value #2 (optional)</label>
+              <input id="cycleTargetValue2" type="number" step="any" placeholder="Needed when using unknown #2" />
+
+              <label for="cycleSolveMin2">Search min #2 (optional)</label>
+              <input id="cycleSolveMin2" type="number" step="any" placeholder="Auto if blank" />
+
+              <label for="cycleSolveMax2">Search max #2 (optional)</label>
+              <input id="cycleSolveMax2" type="number" step="any" placeholder="Auto if blank" />
 
               <p class="validation-msg" id="cycleInverseMessage"></p>
               <button type="submit" id="solveUnknownBtn">Solve Unknown</button>

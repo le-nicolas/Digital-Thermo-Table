@@ -23,7 +23,7 @@ ThermoLookup is a thermodynamic property interpolation tool for mechanical engin
   - `Property Differences` (`Delta h`, `Delta s`, `Delta u`, `Delta v`) between two states
 - Adds sanity warnings for common mistakes (for example `x` outside `0..1`, non-physical pressure, and suspicious irreversible-process trends)
 - Cycle templates now support user-entered inputs (pressures, temperatures, efficiencies) instead of fixed hardcoded defaults
-- Cycle tab now includes a generalized unknown-variable solve mode (pick unknown input + target metric, then solve via iterative root finding)
+- Cycle tab now includes a generalized unknown-variable solve mode (1-unknown/1-target or 2-unknown/2-target with DOF checks, solved iteratively)
 - Cycle panel now surfaces thermodynamic sanity-check warnings (quality bounds, sign checks on work, and non-physical trends)
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app

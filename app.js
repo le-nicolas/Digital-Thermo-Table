@@ -233,6 +233,11 @@ const el = {
   cycleTargetValue: document.getElementById("cycleTargetValue"),
   cycleSolveMin: document.getElementById("cycleSolveMin"),
   cycleSolveMax: document.getElementById("cycleSolveMax"),
+  cycleUnknownSelect2: document.getElementById("cycleUnknownSelect2"),
+  cycleTargetMetricSelect2: document.getElementById("cycleTargetMetricSelect2"),
+  cycleTargetValue2: document.getElementById("cycleTargetValue2"),
+  cycleSolveMin2: document.getElementById("cycleSolveMin2"),
+  cycleSolveMax2: document.getElementById("cycleSolveMax2"),
   cycleInverseMessage: document.getElementById("cycleInverseMessage"),
   solveUnknownBtn: document.getElementById("solveUnknownBtn"),
   toggleDome: document.getElementById("toggleDome"),
@@ -2409,6 +2414,11 @@ function defaultCycleInverseInputs(templateId) {
     targetValue: "",
     min: "",
     max: "",
+    unknownKey2: "none",
+    targetKey2: "none",
+    targetValue2: "",
+    min2: "",
+    max2: "",
   };
 }
 
@@ -2439,10 +2449,11 @@ function readCycleInputsFromForm(templateId) {
   return inputs;
 }
 
-function readCycleInputsFromFormExcluding(templateId, unknownKey) {
+function readCycleInputsFromFormExcludingKeys(templateId, excludedKeys) {
+  const excludeSet = new Set(excludedKeys);
   const inputs = {};
   for (const field of cycleInputSchema(templateId)) {
-    if (field.key === unknownKey) {
+    if (excludeSet.has(field.key)) {
       continue;
     }
     const input = document.getElementById(`cycleInput_${field.key}`);
@@ -2502,7 +2513,7 @@ function renderCycleInputFields(templateId) {
 }
 
 function renderCycleInverseControls(templateId) {
-  if (!el.cycleUnknownSelect || !el.cycleTargetMetricSelect) {
+  if (!el.cycleUnknownSelect || !el.cycleTargetMetricSelect || !el.cycleUnknownSelect2 || !el.cycleTargetMetricSelect2) {
     return;
   }
 
@@ -2516,6 +2527,12 @@ function renderCycleInverseControls(templateId) {
   if (!metrics.some((metric) => metric.key === config.targetKey)) {
     config.targetKey = metrics[0]?.key || "";
   }
+  if (!fields.some((field) => field.key === config.unknownKey2)) {
+    config.unknownKey2 = "none";
+  }
+  if (!metrics.some((metric) => metric.key === config.targetKey2)) {
+    config.targetKey2 = "none";
+  }
 
   el.cycleUnknownSelect.innerHTML = "";
   for (const field of fields) {
@@ -2523,6 +2540,13 @@ function renderCycleInverseControls(templateId) {
     option.value = field.key;
     option.textContent = field.label;
     el.cycleUnknownSelect.appendChild(option);
+  }
+  el.cycleUnknownSelect2.innerHTML = '<option value="none">None</option>';
+  for (const field of fields) {
+    const option = document.createElement("option");
+    option.value = field.key;
+    option.textContent = field.label;
+    el.cycleUnknownSelect2.appendChild(option);
   }
 
   el.cycleTargetMetricSelect.innerHTML = "";
@@ -2533,6 +2557,14 @@ function renderCycleInverseControls(templateId) {
     option.textContent = `${metric.label}${suffix}`;
     el.cycleTargetMetricSelect.appendChild(option);
   }
+  el.cycleTargetMetricSelect2.innerHTML = '<option value="none">None</option>';
+  for (const metric of metrics) {
+    const suffix = metric.unit && metric.unit !== "-" ? ` [${metric.unit}]` : "";
+    const option = document.createElement("option");
+    option.value = metric.key;
+    option.textContent = `${metric.label}${suffix}`;
+    el.cycleTargetMetricSelect2.appendChild(option);
+  }
 
   const validConfig = fields.length > 0 && metrics.length > 0;
   el.cycleUnknownSelect.disabled = !validConfig;
@@ -2540,6 +2572,11 @@ function renderCycleInverseControls(templateId) {
   el.cycleTargetValue.disabled = !validConfig;
   el.cycleSolveMin.disabled = !validConfig;
   el.cycleSolveMax.disabled = !validConfig;
+  el.cycleUnknownSelect2.disabled = !validConfig;
+  el.cycleTargetMetricSelect2.disabled = !validConfig;
+  el.cycleTargetValue2.disabled = !validConfig;
+  el.cycleSolveMin2.disabled = !validConfig;
+  el.cycleSolveMax2.disabled = !validConfig;
   el.solveUnknownBtn.disabled = !validConfig;
 
   if (!validConfig) {
@@ -2549,11 +2586,16 @@ function renderCycleInverseControls(templateId) {
 
   el.cycleUnknownSelect.value = config.unknownKey;
   el.cycleTargetMetricSelect.value = config.targetKey;
+  el.cycleUnknownSelect2.value = config.unknownKey2 || "none";
+  el.cycleTargetMetricSelect2.value = config.targetKey2 || "none";
   el.cycleTargetValue.value = Number.isFinite(config.targetValue) ? String(config.targetValue) : "";
   el.cycleSolveMin.value = Number.isFinite(config.min) ? String(config.min) : "";
   el.cycleSolveMax.value = Number.isFinite(config.max) ? String(config.max) : "";
+  el.cycleTargetValue2.value = Number.isFinite(config.targetValue2) ? String(config.targetValue2) : "";
+  el.cycleSolveMin2.value = Number.isFinite(config.min2) ? String(config.min2) : "";
+  el.cycleSolveMax2.value = Number.isFinite(config.max2) ? String(config.max2) : "";
 
-  setCycleInverseMessage("Choose one unknown input and target metric, then click Solve Unknown.");
+  setCycleInverseMessage("Set 1 unknown + 1 target, or 2 unknowns + 2 targets, then click Solve Unknown.");
 }
 
 function satStateAtPressure(table, pressure, props) {
@@ -2914,6 +2956,156 @@ function solveUnknownByTarget(templateId, unknownKey, targetKey, targetValue, kn
   }
 
   return { ...best, iterations: iteration, bracketed: true };
+}
+
+function evaluateCycleMetricSet(templateId, unknownAssignments, knownInputs, targetKeys) {
+  const builder = findTemplateBuilder(templateId);
+  if (!builder) {
+    throw new Error(`Unknown cycle template: ${templateId}.`);
+  }
+
+  const candidateInputs = mergeCycleInputs(templateId, { ...knownInputs, ...unknownAssignments });
+  let built = null;
+  try {
+    built = builder(candidateInputs);
+  } catch (error) {
+    return null;
+  }
+
+  const targetValues = {};
+  for (const key of targetKeys) {
+    const metric = built.metrics.find((entry) => entry.key === key);
+    if (!metric || !Number.isFinite(metric.value)) {
+      return null;
+    }
+    targetValues[key] = metric.value;
+  }
+
+  return {
+    built,
+    inputs: candidateInputs,
+    targetValues,
+  };
+}
+
+function solveTwoUnknownsByTargets({
+  templateId,
+  unknownKeys,
+  targetKeys,
+  targetValues,
+  knownInputs,
+  bounds,
+}) {
+  const [u1, u2] = unknownKeys;
+  const [k1, k2] = targetKeys;
+  const [t1, t2] = targetValues;
+
+  const range1 = defaultSearchBoundsForUnknown(templateId, u1, knownInputs, bounds[0]?.min ?? null, bounds[0]?.max ?? null);
+  const range2 = defaultSearchBoundsForUnknown(templateId, u2, knownInputs, bounds[1]?.min ?? null, bounds[1]?.max ?? null);
+  const scale1 = Math.max(Math.abs(t1), 1);
+  const scale2 = Math.max(Math.abs(t2), 1);
+  const tol1 = Math.max(1e-7, Math.abs(t1) * 1e-4);
+  const tol2 = Math.max(1e-7, Math.abs(t2) * 1e-4);
+
+  const objective = (r1, r2) => (r1 / scale1) ** 2 + (r2 / scale2) ** 2;
+
+  const sampleN = 28;
+  let best = null;
+  let evalCount = 0;
+
+  for (let i = 0; i <= sampleN; i += 1) {
+    const x1 = range1.min + (i / sampleN) * (range1.max - range1.min);
+    for (let j = 0; j <= sampleN; j += 1) {
+      const x2 = range2.min + (j / sampleN) * (range2.max - range2.min);
+      const evaluation = evaluateCycleMetricSet(templateId, { [u1]: x1, [u2]: x2 }, knownInputs, [k1, k2]);
+      if (!evaluation) {
+        continue;
+      }
+
+      evalCount += 1;
+      const r1 = evaluation.targetValues[k1] - t1;
+      const r2 = evaluation.targetValues[k2] - t2;
+      const obj = objective(r1, r2);
+      if (!best || obj < best.objective) {
+        best = {
+          x1,
+          x2,
+          r1,
+          r2,
+          objective: obj,
+          evaluation,
+        };
+      }
+    }
+  }
+
+  if (!best) {
+    throw new Error("Could not evaluate valid states for the selected two-unknown solve. Adjust search ranges.");
+  }
+
+  let step1 = (range1.max - range1.min) / 6;
+  let step2 = (range2.max - range2.min) / 6;
+  let iterations = 0;
+  const maxIterations = 80;
+
+  while (iterations < maxIterations) {
+    iterations += 1;
+    let improved = false;
+
+    for (const d1 of [0, -step1, step1]) {
+      for (const d2 of [0, -step2, step2]) {
+        if (Math.abs(d1) < 1e-14 && Math.abs(d2) < 1e-14) {
+          continue;
+        }
+
+        const x1 = clamp(best.x1 + d1, range1.min, range1.max);
+        const x2 = clamp(best.x2 + d2, range2.min, range2.max);
+        const evaluation = evaluateCycleMetricSet(templateId, { [u1]: x1, [u2]: x2 }, knownInputs, [k1, k2]);
+        if (!evaluation) {
+          continue;
+        }
+
+        evalCount += 1;
+        const r1 = evaluation.targetValues[k1] - t1;
+        const r2 = evaluation.targetValues[k2] - t2;
+        const obj = objective(r1, r2);
+        if (obj + 1e-14 < best.objective) {
+          best = {
+            x1,
+            x2,
+            r1,
+            r2,
+            objective: obj,
+            evaluation,
+          };
+          improved = true;
+        }
+      }
+    }
+
+    if (!improved) {
+      step1 *= 0.5;
+      step2 *= 0.5;
+    }
+
+    if ((Math.abs(best.r1) <= tol1 && Math.abs(best.r2) <= tol2) || (step1 < 1e-8 && step2 < 1e-8)) {
+      break;
+    }
+  }
+
+  return {
+    unknownValues: { [u1]: best.x1, [u2]: best.x2 },
+    solvedMetrics: {
+      [k1]: best.evaluation.targetValues[k1],
+      [k2]: best.evaluation.targetValues[k2],
+    },
+    residuals: { [k1]: best.r1, [k2]: best.r2 },
+    objective: best.objective,
+    inputs: best.evaluation.inputs,
+    iterations,
+    evaluations: evalCount,
+    converged: Math.abs(best.r1) <= tol1 && Math.abs(best.r2) <= tol2,
+  };
 }
 
 function buildIdealRankineTemplate(inputOverride = null) {
@@ -3815,51 +4007,142 @@ function solveCycleUnknownFromForm() {
   }
 
   try {
-    const unknownKey = el.cycleUnknownSelect.value;
-    const targetKey = el.cycleTargetMetricSelect.value;
-    if (!unknownKey) {
+    const unknownKey1 = el.cycleUnknownSelect.value;
+    const unknownKey2 = el.cycleUnknownSelect2?.value || "none";
+    const targetKey1 = el.cycleTargetMetricSelect.value;
+    const targetKey2 = el.cycleTargetMetricSelect2?.value || "none";
+
+    if (!unknownKey1) {
       throw new Error("Select an unknown input.");
     }
-    if (!targetKey) {
+    if (!targetKey1) {
       throw new Error("Select a target metric.");
     }
 
-    const targetValue = parseOptionalCycleNumber(el.cycleTargetValue.value, "Target value");
-    if (!Number.isFinite(targetValue)) {
-      throw new Error("Target value is required.");
+    const targetValue1 = parseOptionalCycleNumber(el.cycleTargetValue.value, "Target value #1");
+    const targetValue2 = parseOptionalCycleNumber(el.cycleTargetValue2?.value, "Target value #2");
+
+    if (!Number.isFinite(targetValue1)) {
+      throw new Error("Target value #1 is required.");
     }
 
-    const minValue = parseOptionalCycleNumber(el.cycleSolveMin.value, "Search min");
-    const maxValue = parseOptionalCycleNumber(el.cycleSolveMax.value, "Search max");
-    const knownInputs = readCycleInputsFromFormExcluding(templateId, unknownKey);
-    const unknownGuessRaw = document.getElementById(`cycleInput_${unknownKey}`)?.value;
-    const unknownGuess = parseOptionalCycleNumber(unknownGuessRaw, "Unknown guess");
-    if (Number.isFinite(unknownGuess)) {
-      knownInputs[unknownKey] = unknownGuess;
+    const unknownKeys = [unknownKey1];
+    if (unknownKey2 && unknownKey2 !== "none") {
+      unknownKeys.push(unknownKey2);
     }
-    const solved = solveUnknownByTarget(templateId, unknownKey, targetKey, targetValue, knownInputs, minValue, maxValue);
 
-    state.cycle.templateInputs[templateId] = solved.inputs;
+    const targetSpecs = [{ key: targetKey1, value: targetValue1 }];
+    const secondTargetRequested = (targetKey2 && targetKey2 !== "none") || Number.isFinite(targetValue2);
+    if (secondTargetRequested) {
+      if (!targetKey2 || targetKey2 === "none") {
+        throw new Error("Select target metric #2 when using a second target value.");
+      }
+      if (!Number.isFinite(targetValue2)) {
+        throw new Error("Target value #2 is required for a second equation.");
+      }
+      targetSpecs.push({ key: targetKey2, value: targetValue2 });
+    }
+
+    if (new Set(unknownKeys).size !== unknownKeys.length) {
+      throw new Error("Unknown inputs must be different.");
+    }
+    if (new Set(targetSpecs.map((target) => target.key)).size !== targetSpecs.length) {
+      throw new Error("Target metrics must be different.");
+    }
+
+    const dofUnknowns = unknownKeys.length;
+    const dofEquations = targetSpecs.length;
+    if (dofUnknowns !== dofEquations) {
+      throw new Error(
+        `DOF mismatch: ${dofUnknowns} unknown input(s) selected, but ${dofEquations} target equation(s) provided. Match unknown count to target count.`,
+      );
+    }
+
+    const minValue1 = parseOptionalCycleNumber(el.cycleSolveMin.value, "Search min #1");
+    const maxValue1 = parseOptionalCycleNumber(el.cycleSolveMax.value, "Search max #1");
+    const minValue2 = parseOptionalCycleNumber(el.cycleSolveMin2?.value, "Search min #2");
+    const maxValue2 = parseOptionalCycleNumber(el.cycleSolveMax2?.value, "Search max #2");
+
+    const knownInputs = readCycleInputsFromFormExcludingKeys(templateId, unknownKeys);
+    for (const unknownKey of unknownKeys) {
+      const unknownGuessRaw = document.getElementById(`cycleInput_${unknownKey}`)?.value;
+      const unknownGuess = parseOptionalCycleNumber(unknownGuessRaw, `Unknown guess (${unknownKey})`);
+      if (Number.isFinite(unknownGuess)) {
+        knownInputs[unknownKey] = unknownGuess;
+      }
+    }
+
     const inverseConfig = cycleInverseInputsForTemplate(templateId);
-    inverseConfig.unknownKey = unknownKey;
-    inverseConfig.targetKey = targetKey;
-    inverseConfig.targetValue = targetValue;
-    inverseConfig.min = Number.isFinite(minValue) ? minValue : "";
-    inverseConfig.max = Number.isFinite(maxValue) ? maxValue : "";
+    inverseConfig.unknownKey = unknownKey1;
+    inverseConfig.targetKey = targetKey1;
+    inverseConfig.targetValue = targetValue1;
+    inverseConfig.min = Number.isFinite(minValue1) ? minValue1 : "";
+    inverseConfig.max = Number.isFinite(maxValue1) ? maxValue1 : "";
+    inverseConfig.unknownKey2 = unknownKey2 || "none";
+    inverseConfig.targetKey2 = targetKey2 || "none";
+    inverseConfig.targetValue2 = Number.isFinite(targetValue2) ? targetValue2 : "";
+    inverseConfig.min2 = Number.isFinite(minValue2) ? minValue2 : "";
+    inverseConfig.max2 = Number.isFinite(maxValue2) ? maxValue2 : "";
 
+    if (unknownKeys.length === 1) {
+      const solved = solveUnknownByTarget(
+        templateId,
+        unknownKey1,
+        targetKey1,
+        targetValue1,
+        knownInputs,
+        minValue1,
+        maxValue1,
+      );
+
+      state.cycle.templateInputs[templateId] = solved.inputs;
+      renderCycleInputFields(templateId);
+      renderCycleInverseControls(templateId);
+      loadCycleTemplate(templateId, solved.inputs);
+
+      const fieldLabel = fields.find((field) => field.key === unknownKey1)?.label || unknownKey1;
+      const metricLabel = metrics.find((metric) => metric.key === targetKey1)?.label || targetKey1;
+      const residualAbs = Math.abs(solved.residual);
+      const solveKind = residualAbs <= Math.max(1e-6, Math.abs(targetValue1) * 1e-5) ? "ok" : "warn";
+      setCycleInverseMessage(
+        `Solved ${fieldLabel}: ${formatNumber(solved.unknownValue)} | ${metricLabel}=${formatNumber(solved.metricValue)} (target ${formatNumber(targetValue1)}).`,
+        solveKind,
+      );
+      setCycleStatus(`Unknown solver completed in ${solved.iterations} iterations.`, "ok");
+      return;
+    }
+
+    const twoUnknownSolved = solveTwoUnknownsByTargets({
+      templateId,
+      unknownKeys: [unknownKey1, unknownKey2],
+      targetKeys: [targetKey1, targetKey2],
+      targetValues: [targetValue1, targetValue2],
+      knownInputs,
+      bounds: [
+        { min: minValue1, max: maxValue1 },
+        { min: minValue2, max: maxValue2 },
+      ],
+    });
+
+    state.cycle.templateInputs[templateId] = twoUnknownSolved.inputs;
     renderCycleInputFields(templateId);
     renderCycleInverseControls(templateId);
-    loadCycleTemplate(templateId, solved.inputs);
+    loadCycleTemplate(templateId, twoUnknownSolved.inputs);
 
-    const fieldLabel = fields.find((field) => field.key === unknownKey)?.label || unknownKey;
-    const metricLabel = metrics.find((metric) => metric.key === targetKey)?.label || targetKey;
-    const residualAbs = Math.abs(solved.residual);
-    const solveKind = residualAbs <= Math.max(1e-6, Math.abs(targetValue) * 1e-5) ? "ok" : "warn";
+    const fieldLabel1 = fields.find((field) => field.key === unknownKey1)?.label || unknownKey1;
+    const fieldLabel2 = fields.find((field) => field.key === unknownKey2)?.label || unknownKey2;
+    const metricLabel1 = metrics.find((metric) => metric.key === targetKey1)?.label || targetKey1;
+    const metricLabel2 = metrics.find((metric) => metric.key === targetKey2)?.label || targetKey2;
+    const summary = `${fieldLabel1}=${formatNumber(twoUnknownSolved.unknownValues[unknownKey1])}, ${fieldLabel2}=${formatNumber(twoUnknownSolved.unknownValues[unknownKey2])}`;
+    const residualSummary = `${metricLabel1} residual=${formatNumber(twoUnknownSolved.residuals[targetKey1])}, ${metricLabel2} residual=${formatNumber(twoUnknownSolved.residuals[targetKey2])}`;
     setCycleInverseMessage(
-      `Solved ${fieldLabel}: ${formatNumber(solved.unknownValue)} | ${metricLabel}=${formatNumber(solved.metricValue)} (target ${formatNumber(targetValue)}).`,
-      solveKind,
+      `2-unknown solve: ${summary}. ${residualSummary}.`,
+      twoUnknownSolved.converged ? "ok" : "warn",
     );
-    setCycleStatus(`Unknown solver completed in ${solved.iterations} iterations.`, "ok");
+    setCycleStatus(
+      `2-unknown solver completed in ${twoUnknownSolved.iterations} iterations (${twoUnknownSolved.evaluations} evaluations).`,
+      twoUnknownSolved.converged ? "ok" : "warn",
+    );
   } catch (error) {
     setCycleInverseMessage(error.message, "error");
     setCycleStatus(error.message, "warn");
@@ -3930,6 +4213,20 @@ function wireCycleEvents() {
     });
   }
 
+  if (el.cycleUnknownSelect2) {
+    el.cycleUnknownSelect2.addEventListener("change", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      config.unknownKey2 = el.cycleUnknownSelect2.value || "none";
+    });
+  }
+
+  if (el.cycleTargetMetricSelect2) {
+    el.cycleTargetMetricSelect2.addEventListener("change", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      config.targetKey2 = el.cycleTargetMetricSelect2.value || "none";
+    });
+  }
+
   if (el.cycleTargetValue) {
     el.cycleTargetValue.addEventListener("input", () => {
       const config = cycleInverseInputsForTemplate(state.cycle.templateId);
@@ -3962,6 +4259,42 @@ function wireCycleEvents() {
       } else {
         const value = Number(el.cycleSolveMax.value);
         config.max = Number.isFinite(value) ? value : "";
+      }
+    });
+  }
+
+  if (el.cycleTargetValue2) {
+    el.cycleTargetValue2.addEventListener("input", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      if (el.cycleTargetValue2.value.trim() === "") {
+        config.targetValue2 = "";
+      } else {
+        const value = Number(el.cycleTargetValue2.value);
+        config.targetValue2 = Number.isFinite(value) ? value : "";
+      }
+    });
+  }
+
+  if (el.cycleSolveMin2) {
+    el.cycleSolveMin2.addEventListener("input", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      if (el.cycleSolveMin2.value.trim() === "") {
+        config.min2 = "";
+      } else {
+        const value = Number(el.cycleSolveMin2.value);
+        config.min2 = Number.isFinite(value) ? value : "";
+      }
+    });
+  }
+
+  if (el.cycleSolveMax2) {
+    el.cycleSolveMax2.addEventListener("input", () => {
+      const config = cycleInverseInputsForTemplate(state.cycle.templateId);
+      if (el.cycleSolveMax2.value.trim() === "") {
+        config.max2 = "";
+      } else {
+        const value = Number(el.cycleSolveMax2.value);
+        config.max2 = Number.isFinite(value) ? value : "";
       }
     });
   }
