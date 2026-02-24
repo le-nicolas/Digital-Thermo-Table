@@ -19,8 +19,11 @@ ThermoLookup is a thermodynamic property interpolation tool for mechanical engin
 - Supports workflow solvers (new):
   - `Phase Determination` from `T` and `P` using saturation checks
   - `Two-Phase Mixture` using quality `x` (or back-calculating `x` from a known property)
+  - `Reverse Lookup` from `P + h` or `P + s` to infer `T`, phase, and quality where applicable
+  - `Guided State Identification` that recommends which table family to use next
   - `Isentropic Turbine / Compressor` with reverse lookup (`P + s`) and efficiency correction
   - `Property Differences` (`Delta h`, `Delta s`, `Delta u`, `Delta v`) between two states
+- Adds sanity warnings for common mistakes (for example `x` outside `0..1`, non-physical pressure, and suspicious irreversible-process trends)
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app
 

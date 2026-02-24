@@ -59,6 +59,8 @@ const CYCLE_TEMPLATES = [
 const WORKFLOW_TYPES = [
   { id: "phase-check", label: "Phase Determination" },
   { id: "two-phase", label: "Two-Phase Mixture" },
+  { id: "reverse-lookup", label: "Reverse Lookup (P+h / P+s)" },
+  { id: "state-guide", label: "Guided State Identification" },
   { id: "isentropic-device", label: "Isentropic Turbine / Compressor" },
   { id: "property-delta", label: "Property Differences" },
 ];
@@ -1093,18 +1095,24 @@ function workflowRequiredModes(workflowType) {
   if (workflowType === "phase-check" || workflowType === "two-phase") {
     return ["sat-T"];
   }
+  if (workflowType === "reverse-lookup" || workflowType === "state-guide") {
+    return ["PT", "sat-T"];
+  }
   return ["PT"];
 }
 
+function fluidHasMode(fluid, mode) {
+  return state.tables.some((table) => table.fluid === fluid && table.mode === mode);
+}
+
 function workflowFluidsForType(workflowType) {
-  const modes = workflowRequiredModes(workflowType);
-  const fluids = new Set();
-  for (const table of state.tables) {
-    if (modes.includes(table.mode)) {
-      fluids.add(table.fluid);
-    }
+  const allFluids = [...new Set(state.tables.map((table) => table.fluid))];
+  if (workflowType === "reverse-lookup" || workflowType === "state-guide") {
+    return allFluids.filter((fluid) => fluidHasMode(fluid, "PT") && fluidHasMode(fluid, "sat-T")).sort((a, b) => a.localeCompare(b));
   }
-  return [...fluids].sort((a, b) => a.localeCompare(b));
+
+  const mode = workflowType === "phase-check" || workflowType === "two-phase" ? "sat-T" : "PT";
+  return allFluids.filter((fluid) => fluidHasMode(fluid, mode)).sort((a, b) => a.localeCompare(b));
 }
 
 function findWorkflowTable({ mode, fluid, unitSystem }) {
@@ -1118,6 +1126,23 @@ function getWorkflowSatTable(fluid, unitSystem) {
 
 function getWorkflowPtTable(fluid, unitSystem) {
   return findWorkflowTable({ mode: "PT", fluid, unitSystem });
+}
+
+function workflowUnitsForType(fluid, workflowType) {
+  if (!fluid) {
+    return [];
+  }
+
+  const unitsByMode = (mode) => new Set(state.tables.filter((table) => table.fluid === fluid && table.mode === mode).map((table) => table.unit_system));
+
+  if (workflowType === "reverse-lookup" || workflowType === "state-guide") {
+    const ptUnits = unitsByMode("PT");
+    const satUnits = unitsByMode("sat-T");
+    return [...ptUnits].filter((unit) => satUnits.has(unit)).sort((a, b) => a.localeCompare(b));
+  }
+
+  const mode = workflowType === "phase-check" || workflowType === "two-phase" ? "sat-T" : "PT";
+  return [...unitsByMode(mode)].sort((a, b) => a.localeCompare(b));
 }
 
 function clearWorkflowResults() {
@@ -1210,6 +1235,253 @@ function qualityRegionFromX(x) {
   return "Saturated mixture (0 < x < 1)";
 }
 
+function phaseGuidance(phaseRegion) {
+  if (/compressed/i.test(phaseRegion)) {
+    return {
+      table: "Use compressed-liquid data if available; otherwise use saturated-liquid approximation cautiously.",
+      next: "Bring a second independent property (for example T or h) to lock the state.",
+    };
+  }
+  if (/superheated/i.test(phaseRegion)) {
+    return {
+      table: "Use the superheated/PT table.",
+      next: "Interpolate with pressure and one additional property or temperature.",
+    };
+  }
+  if (/saturated mixture/i.test(phaseRegion)) {
+    return {
+      table: "Use saturated table and quality relations.",
+      next: "You need one extra property (x, h, s, u, or v) to locate the state in the dome.",
+    };
+  }
+  if (/saturated liquid/i.test(phaseRegion) || /saturated vapor/i.test(phaseRegion)) {
+    return {
+      table: "Use saturated table at the same T or P.",
+      next: "Use f/g properties directly at the saturation state.",
+    };
+  }
+  return {
+    table: "Check available tables for this fluid and unit system.",
+    next: "Reconfirm which two independent properties are known.",
+  };
+}
+
+function addWorkflowWarnings(solution, warnings) {
+  if (!warnings || warnings.length === 0) {
+    return solution;
+  }
+
+  const merged = {
+    ...solution,
+    items: [...solution.items],
+    steps: [...solution.steps],
+  };
+
+  merged.steps.push(`Sanity checks flagged ${warnings.length} potential issue(s).`);
+  for (let i = 0; i < warnings.length; i += 1) {
+    merged.items.push({
+      label: `Sanity ${i + 1}`,
+      value: warnings[i],
+      desc: "Review assumptions",
+    });
+    merged.steps.push(`Sanity ${i + 1}: ${warnings[i]}`);
+  }
+
+  return merged;
+}
+
+function classifyFromSaturationProperty(satState, propertyKey, propertyValue) {
+  const map = QUALITY_PROPERTY_MAP[propertyKey];
+  if (!map) {
+    throw new Error(`Property ${propertyKey} is not supported for saturation classification.`);
+  }
+
+  const f = satState[map.f];
+  const g = satState[map.g];
+  const fg = satState[map.fg];
+  if (!Number.isFinite(f) || !Number.isFinite(g) || !Number.isFinite(fg) || Math.abs(fg) < 1e-12) {
+    throw new Error(`Saturation values ${map.f}/${map.g}/${map.fg} are unavailable.`);
+  }
+
+  const span = Math.abs(g - f);
+  const tol = Math.max(1e-9, span * 0.002);
+  const x = (propertyValue - f) / fg;
+
+  if (propertyValue < f - tol) {
+    return { phase: "Compressed liquid (subcooled)", x, tolerance: tol, f, g };
+  }
+  if (propertyValue > g + tol) {
+    return { phase: "Superheated vapor", x, tolerance: tol, f, g };
+  }
+  if (Math.abs(propertyValue - f) <= tol) {
+    return { phase: "Saturated liquid (x = 0)", x: 0, tolerance: tol, f, g };
+  }
+  if (Math.abs(propertyValue - g) <= tol) {
+    return { phase: "Saturated vapor (x = 1)", x: 1, tolerance: tol, f, g };
+  }
+  return { phase: "Saturated mixture (0 < x < 1)", x, tolerance: tol, f, g };
+}
+
+function solveReverseLookupWorkflow({ fluid, unitSystem, lookupKey, P, lookupValue }) {
+  const ptTable = getWorkflowPtTable(fluid, unitSystem);
+  const satTable = getWorkflowSatTable(fluid, unitSystem);
+
+  if (!ptTable) {
+    throw new Error(`No PT table found for ${fluid} (${unitSystem}).`);
+  }
+  if (!satTable) {
+    throw new Error(`No saturated table found for ${fluid} (${unitSystem}).`);
+  }
+
+  const warnings = [];
+  const steps = [];
+  const satProps = ["T", "P", "vf", "vfg", "vg", "uf", "ufg", "ug", "hf", "hfg", "hg", "sf", "sfg", "sg"];
+  let satState = null;
+  let classified = null;
+  let phase = "Unknown";
+
+  try {
+    satState = interpolate1D(satTable.rows, "P", P, satProps).values;
+    classified = classifyFromSaturationProperty(satState, lookupKey, lookupValue);
+    phase = classified.phase;
+    steps.push(`Step 1: At P=${formatNumber(P)}, interpolate saturated properties.`);
+    steps.push(`Step 2: Compare ${lookupKey}=${formatNumber(lookupValue)} to saturation bounds ${formatNumber(classified.f)} to ${formatNumber(classified.g)}.`);
+    steps.push(`Phase classification: ${phase}.`);
+  } catch (error) {
+    warnings.push(`Could not classify phase from saturation data at this pressure: ${error.message}`);
+    steps.push(`Saturation classification unavailable at P=${formatNumber(P)}. Proceeding with PT reverse lookup only.`);
+  }
+
+  const items = [
+    { label: "Known Pair", value: `P + ${lookupKey}`, desc: "Reverse lookup inputs" },
+    { label: "Phase Region", value: phase, desc: "From saturation comparison" },
+  ];
+
+  if (satState) {
+    items.push({ label: "Tsat(P)", value: satState.T, desc: "Saturation temperature at given pressure" });
+  }
+  if (classified) {
+    items.push({ label: `${lookupKey}_f`, value: classified.f, desc: "Saturated liquid limit" });
+    items.push({ label: `${lookupKey}_g`, value: classified.g, desc: "Saturated vapor limit" });
+  }
+
+  if (Number.isFinite(P) && P <= 0) {
+    warnings.push("Pressure should be positive for physical states.");
+  }
+
+  if (classified && /saturated/i.test(phase)) {
+    const x = /liquid/i.test(phase) ? 0 : /vapor/i.test(phase) ? 1 : classified.x;
+    items.push({ label: "Quality x", value: x, desc: qualityRegionFromX(x) });
+    items.push({ label: "T", value: satState.T, desc: "For two-phase states, T = Tsat(P)" });
+    steps.push("Since the state is in the saturation dome, temperature is Tsat at the specified pressure.");
+
+    for (const [baseProp, map] of Object.entries(QUALITY_PROPERTY_MAP)) {
+      if (Number.isFinite(satState[map.f]) && Number.isFinite(satState[map.fg])) {
+        items.push({
+          label: baseProp,
+          value: satState[map.f] + x * satState[map.fg],
+          desc: `${map.f} + x*${map.fg}`,
+        });
+      }
+    }
+
+    if (x < 0 || x > 1) {
+      warnings.push("Computed quality is outside 0..1; check the selected property value and units.");
+    }
+
+    return addWorkflowWarnings(
+      {
+        items,
+        steps,
+        status: `Reverse lookup solved for ${fluid} (${lookupKey} at fixed pressure).`,
+      },
+      warnings,
+    );
+  }
+
+  try {
+    const solved = interpolatePTByProperty(ptTable, P, lookupKey, lookupValue, ["T", "P", "h", "s", "u", "v"]);
+    items.push({ label: "T", value: solved.values.T, desc: "Recovered from reverse PT lookup" });
+    items.push({ label: "h", value: solved.values.h, desc: "Resolved state property" });
+    items.push({ label: "s", value: solved.values.s, desc: "Resolved state property" });
+    items.push({ label: "u", value: solved.values.u, desc: "Resolved state property" });
+    items.push({ label: "v", value: solved.values.v, desc: "Resolved state property" });
+    steps.push(`Step 3: Perform reverse lookup in PT table using known pair (P, ${lookupKey}).`);
+    steps.push(...solved.steps);
+  } catch (error) {
+    if (/compressed/i.test(phase)) {
+      warnings.push("The state is on the compressed-liquid side and PT tables often do not cover it.");
+    }
+    throw new Error(`Reverse lookup could not recover temperature: ${error.message}`);
+  }
+
+  return addWorkflowWarnings(
+    {
+      items,
+      steps,
+      status: `Reverse lookup solved for ${fluid} (${lookupKey} at fixed pressure).`,
+    },
+    warnings,
+  );
+}
+
+function solveStateGuideWorkflow({ fluid, unitSystem, knownPair, T, P, h, s }) {
+  const steps = [];
+  const warnings = [];
+  let items = [
+    { label: "Known Pair", value: knownPair, desc: "Guided state identification input" },
+  ];
+  let phase = "Unknown";
+
+  steps.push("Step A: Identify a valid pair of independent properties.");
+  steps.push("Step B: Determine likely phase region before selecting a table.");
+
+  if (knownPair === "TP") {
+    const phaseSolved = solvePhaseCheckWorkflow({
+      fluid,
+      unitSystem,
+      T,
+      P,
+      qualityProperty: "none",
+      qualityValue: null,
+    });
+    phase = phaseSolved.items.find((item) => item.label === "Phase Region")?.value || "Unknown";
+    items = items.concat(phaseSolved.items);
+    steps.push(...phaseSolved.steps);
+  } else if (knownPair === "Ph") {
+    const reverse = solveReverseLookupWorkflow({ fluid, unitSystem, lookupKey: "h", P, lookupValue: h });
+    phase = reverse.items.find((item) => item.label === "Phase Region")?.value || "Unknown";
+    items = items.concat(reverse.items);
+    steps.push(...reverse.steps);
+  } else if (knownPair === "Ps") {
+    const reverse = solveReverseLookupWorkflow({ fluid, unitSystem, lookupKey: "s", P, lookupValue: s });
+    phase = reverse.items.find((item) => item.label === "Phase Region")?.value || "Unknown";
+    items = items.concat(reverse.items);
+    steps.push(...reverse.steps);
+  } else {
+    throw new Error("Unsupported guided pair. Use TP, Ph, or Ps.");
+  }
+
+  const guidance = phaseGuidance(phase);
+  items.push({ label: "Recommended Table", value: guidance.table, desc: "What to open next" });
+  items.push({ label: "Next Step", value: guidance.next, desc: "How to continue the solution" });
+  steps.push(`Step C: Recommended table path -> ${guidance.table}`);
+  steps.push(`Step D: Next action -> ${guidance.next}`);
+
+  if (/saturated mixture/i.test(phase)) {
+    warnings.push("State is in the two-phase dome; a second property (or quality) is needed for a unique state.");
+  }
+
+  return addWorkflowWarnings(
+    {
+      items,
+      steps,
+      status: `Guided state identification completed for ${fluid}.`,
+    },
+    warnings,
+  );
+}
+
 function solvePhaseCheckWorkflow({ fluid, unitSystem, T, P, qualityProperty, qualityValue }) {
   const satTable = getWorkflowSatTable(fluid, unitSystem);
   if (!satTable) {
@@ -1228,6 +1500,7 @@ function solvePhaseCheckWorkflow({ fluid, unitSystem, T, P, qualityProperty, qua
   const deltaP = P - pSat;
   const deltaPct = safeRatio(deltaP, pSat);
   const tolerance = Math.max(1e-4, Math.abs(pSat) * 0.01);
+  const warnings = [];
   let region = "Saturated mixture region";
 
   if (P > pSat + tolerance) {
@@ -1279,13 +1552,28 @@ function solvePhaseCheckWorkflow({ fluid, unitSystem, T, P, qualityProperty, qua
         });
       }
     }
+
+    if (quality < 0 || quality > 1) {
+      warnings.push("Quality is outside 0..1, which is not physically valid for a two-phase mixture.");
+    }
   }
 
-  return {
-    items,
-    steps,
-    status: `Phase workflow solved for ${fluid}.`,
-  };
+  if (Number.isFinite(P) && P <= 0) {
+    warnings.push("Pressure should be positive for a physical state.");
+  }
+
+  if (/Saturated mixture/i.test(region) && !Number.isFinite(quality)) {
+    warnings.push("Region is saturated; add one more property (or x) to locate a unique state.");
+  }
+
+  return addWorkflowWarnings(
+    {
+      items,
+      steps,
+      status: `Phase workflow solved for ${fluid}.`,
+    },
+    warnings,
+  );
 }
 
 function solveTwoPhaseWorkflow({ fluid, unitSystem, basis, basisValue, qualityMode, xInput, qualityProperty, qualityPropertyValue }) {
@@ -1297,6 +1585,7 @@ function solveTwoPhaseWorkflow({ fluid, unitSystem, basis, basisValue, qualityMo
   const satProps = ["T", "P", "vf", "vfg", "vg", "uf", "ufg", "ug", "hf", "hfg", "hg", "sf", "sfg", "sg"];
   const satLookup = interpolate1D(satTable.rows, basis, basisValue, satProps);
   const sat = satLookup.values;
+  const warnings = [];
   const steps = [];
   steps.push(`Saturation lookup using ${basis}=${formatNumber(basisValue)}.`);
   steps.push(`Resolved state: Tsat=${formatNumber(sat.T)}, Psat=${formatNumber(sat.P)}.`);
@@ -1343,11 +1632,18 @@ function solveTwoPhaseWorkflow({ fluid, unitSystem, basis, basisValue, qualityMo
     }
   }
 
-  return {
-    items,
-    steps,
-    status: `Two-phase workflow solved for ${fluid}.`,
-  };
+  if (quality < 0 || quality > 1) {
+    warnings.push("Quality is outside 0..1, so this is not a physically valid saturated-mixture state.");
+  }
+
+  return addWorkflowWarnings(
+    {
+      items,
+      steps,
+      status: `Two-phase workflow solved for ${fluid}.`,
+    },
+    warnings,
+  );
 }
 
 function solveIsentropicDeviceWorkflow({ fluid, unitSystem, device, P1, T1, P2, eta }) {
@@ -1372,6 +1668,7 @@ function solveIsentropicDeviceWorkflow({ fluid, unitSystem, device, P1, T1, P2, 
     throw new Error("Could not resolve isentropic exit enthalpy h2s.");
   }
 
+  const warnings = [];
   let h2 = null;
   let specificWorkIsentropic = null;
   let specificWorkActual = null;
@@ -1426,13 +1723,30 @@ function solveIsentropicDeviceWorkflow({ fluid, unitSystem, device, P1, T1, P2, 
   }
   if (actualExitNote) {
     items.push({ label: "State note", value: actualExitNote, desc: "Range warning" });
+    warnings.push(actualExitNote);
   }
 
-  return {
-    items,
-    steps,
-    status: `Isentropic ${isTurbine ? "turbine" : "compressor"} workflow solved for ${fluid}.`,
-  };
+  if (eta > 1) {
+    warnings.push("Isentropic efficiency greater than 1 is typically non-physical.");
+  }
+  if (isTurbine && P2 >= P1) {
+    warnings.push("Turbines usually expand, so outlet pressure is expected to be lower than inlet pressure.");
+  }
+  if (!isTurbine && P2 <= P1) {
+    warnings.push("Compressors usually raise pressure, so outlet pressure is expected to be higher than inlet pressure.");
+  }
+  if (actualExit && Number.isFinite(actualExit.s) && actualExit.s < s1 - 1e-6 && eta < 1) {
+    warnings.push("Entropy decreased across an irreversible device; check inputs and selected tables.");
+  }
+
+  return addWorkflowWarnings(
+    {
+      items,
+      steps,
+      status: `Isentropic ${isTurbine ? "turbine" : "compressor"} workflow solved for ${fluid}.`,
+    },
+    warnings,
+  );
 }
 
 function solvePropertyDeltaWorkflow({ fluid, unitSystem, T1, P1, T2, P2 }) {
@@ -1521,7 +1835,6 @@ function populateWorkflowFluidSelect(preserveFluid = null) {
 
 function populateWorkflowUnitSelect(preserveUnit = null) {
   const fluid = el.workflowFluidSelect.value;
-  const modes = workflowRequiredModes(state.workflow.type);
   el.workflowUnitSelect.innerHTML = "";
 
   if (!fluid) {
@@ -1533,8 +1846,7 @@ function populateWorkflowUnitSelect(preserveUnit = null) {
     return;
   }
 
-  const units = [...new Set(state.tables.filter((table) => table.fluid === fluid && modes.includes(table.mode)).map((table) => table.unit_system))]
-    .sort((a, b) => a.localeCompare(b));
+  const units = workflowUnitsForType(fluid, state.workflow.type);
 
   if (units.length === 0) {
     const option = document.createElement("option");
@@ -1647,6 +1959,59 @@ function renderWorkflowFields() {
     return;
   }
 
+  if (state.workflow.type === "reverse-lookup") {
+    el.workflowFields.innerHTML = `
+      <div class="query-field">
+        <label for="wfReverseKey">Known property with pressure</label>
+        <select id="wfReverseKey">
+          <option value="h">P + h (find T, phase)</option>
+          <option value="s">P + s (find T, phase)</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfReverseP">Pressure P (${pRangeText})</label>
+        <input id="wfReverseP" type="number" step="any" placeholder="Known P" />
+      </div>
+      <div class="query-field">
+        <label for="wfReverseValue">Known property value (${unitSystem})</label>
+        <input id="wfReverseValue" type="number" step="any" placeholder="Known h or s" />
+      </div>
+    `;
+    setWorkflowValidationMessage("Reverse lookup solves unknown temperature/phase from a pressure-property pair.");
+    return;
+  }
+
+  if (state.workflow.type === "state-guide") {
+    el.workflowFields.innerHTML = `
+      <div class="query-field">
+        <label for="wfGuidePair">Known property pair</label>
+        <select id="wfGuidePair">
+          <option value="TP">T + P</option>
+          <option value="Ph">P + h</option>
+          <option value="Ps">P + s</option>
+        </select>
+      </div>
+      <div class="query-field">
+        <label for="wfGuideT">Temperature T (${tRangeText}, only for T+P)</label>
+        <input id="wfGuideT" type="number" step="any" placeholder="Known T" />
+      </div>
+      <div class="query-field">
+        <label for="wfGuideP">Pressure P (${pRangeText})</label>
+        <input id="wfGuideP" type="number" step="any" placeholder="Known P" />
+      </div>
+      <div class="query-field">
+        <label for="wfGuideH">Enthalpy h (only for P+h)</label>
+        <input id="wfGuideH" type="number" step="any" placeholder="Known h" />
+      </div>
+      <div class="query-field">
+        <label for="wfGuideS">Entropy s (only for P+s)</label>
+        <input id="wfGuideS" type="number" step="any" placeholder="Known s" />
+      </div>
+    `;
+    setWorkflowValidationMessage("Guided flow: identify phase first, then choose the right table and next equation.");
+    return;
+  }
+
   if (state.workflow.type === "isentropic-device") {
     el.workflowFields.innerHTML = `
       <div class="query-field">
@@ -1741,6 +2106,37 @@ function handleWorkflowSubmit(event) {
         xInput,
         qualityProperty,
         qualityPropertyValue,
+      });
+    } else if (workflowType === "reverse-lookup") {
+      const lookupKey = document.getElementById("wfReverseKey").value;
+      const P = parseWorkflowNumberInput("wfReverseP", "Pressure P");
+      const lookupValue = parseWorkflowNumberInput("wfReverseValue", `Known ${lookupKey} value`);
+      solved = solveReverseLookupWorkflow({ fluid, unitSystem, lookupKey, P, lookupValue });
+    } else if (workflowType === "state-guide") {
+      const knownPair = document.getElementById("wfGuidePair").value;
+      const T = parseWorkflowNumberInput("wfGuideT", "Temperature T", false);
+      const P = parseWorkflowNumberInput("wfGuideP", "Pressure P", false);
+      const h = parseWorkflowNumberInput("wfGuideH", "Enthalpy h", false);
+      const s = parseWorkflowNumberInput("wfGuideS", "Entropy s", false);
+
+      if (knownPair === "TP" && (!Number.isFinite(T) || !Number.isFinite(P))) {
+        throw new Error("For T + P guidance, enter both temperature and pressure.");
+      }
+      if (knownPair === "Ph" && (!Number.isFinite(P) || !Number.isFinite(h))) {
+        throw new Error("For P + h guidance, enter both pressure and enthalpy.");
+      }
+      if (knownPair === "Ps" && (!Number.isFinite(P) || !Number.isFinite(s))) {
+        throw new Error("For P + s guidance, enter both pressure and entropy.");
+      }
+
+      solved = solveStateGuideWorkflow({
+        fluid,
+        unitSystem,
+        knownPair,
+        T,
+        P,
+        h,
+        s,
       });
     } else if (workflowType === "isentropic-device") {
       const device = document.getElementById("wfIsoDevice").value;
