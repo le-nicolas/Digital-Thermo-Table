@@ -80,14 +80,6 @@ thermo-lookup/
   LICENSE
 ```
 
-## SaaS-ready direction
-
-Next product steps:
-- authenticated user accounts
-- saved queries and favorite tables
-- API endpoints for interpolation
-- classroom/team workspaces
-- paid plans for advanced datasets and exports
 
 ## License
 
