@@ -20,39 +20,227 @@
       <div>
         <p class="eyebrow">Mechanical Engineering Utility</p>
         <h1>ThermoLookup</h1>
-        <p class="subtitle">Direct thermodynamic lookup from your bundled dataset.</p>
+        <p class="subtitle">
+          Property lookup, interpolation history, compare mode, and thermodynamic cycle plotting from your bundled dataset.
+        </p>
       </div>
       <div class="dataset-pill" id="datasetMeta">Loading dataset...</div>
     </header>
 
-    <main class="layout">
-      <section class="panel controls">
-        <h2>Tables</h2>
-        <label for="tableSearch">Search</label>
-        <input id="tableSearch" type="text" placeholder="water, ammonia, R-134a..." />
+    <nav class="tabs" aria-label="Main tabs">
+      <button class="tab-btn active" data-tab="lookup">Property Lookup</button>
+      <button class="tab-btn" data-tab="history">Query History</button>
+      <button class="tab-btn" data-tab="compare">Compare</button>
+      <button class="tab-btn" data-tab="cycle">Cycle Plotter</button>
+    </nav>
 
-        <label for="tableSelect">Select table</label>
-        <select id="tableSelect"></select>
+    <main class="tab-host">
+      <section class="tab-panel active" id="tab-lookup">
+        <div class="lookup-layout">
+          <section class="panel controls">
+            <h2>Lookup Controls</h2>
 
-        <div class="table-meta" id="tableMeta"></div>
+            <label for="fluidFilter">Fluid</label>
+            <select id="fluidFilter"></select>
 
-        <form id="queryForm" class="query-form">
-          <h3>Query</h3>
-          <div id="queryFields"></div>
-          <button type="submit" id="queryBtn">Interpolate</button>
-        </form>
+            <label for="modeFilter">Table type</label>
+            <select id="modeFilter">
+              <option value="all">All types</option>
+              <option value="sat-T">Saturated (T)</option>
+              <option value="sat-P">Saturated (P)</option>
+              <option value="PT">Superheated / PT</option>
+            </select>
+
+            <label for="tableSearch">Search table</label>
+            <input id="tableSearch" type="text" placeholder="water, ammonia, R-134a..." />
+
+            <label for="tableSelect">Select table</label>
+            <select id="tableSelect"></select>
+
+            <div class="table-meta" id="tableMeta"></div>
+
+            <form id="queryForm" class="query-form">
+              <h3>Inputs</h3>
+              <div id="queryFields"></div>
+              <p class="validation-msg" id="validationMessage"></p>
+              <button type="submit" id="queryBtn">Compute Properties</button>
+            </form>
+          </section>
+
+          <section class="panel results">
+            <h2>Lookup Results</h2>
+            <p class="status" id="statusText">Select a table and enter values to begin.</p>
+
+            <div class="result-grid" id="resultGrid"></div>
+
+            <details class="steps" open>
+              <summary>Calculation steps</summary>
+              <ol id="stepsList"></ol>
+            </details>
+          </section>
+        </div>
       </section>
 
-      <section class="panel results">
-        <h2>Results</h2>
-        <p class="status" id="statusText">Select a table and enter values to begin.</p>
+      <section class="tab-panel" id="tab-history">
+        <div class="history-layout">
+          <section class="panel">
+            <h2>Session Stats</h2>
+            <div class="stats-grid">
+              <article class="stat-card">
+                <p class="stat-label">Total queries</p>
+                <p class="stat-value" id="statTotalQueries">0</p>
+              </article>
+              <article class="stat-card">
+                <p class="stat-label">Most-used fluid</p>
+                <p class="stat-value" id="statMostUsedFluid">-</p>
+              </article>
+              <article class="stat-card">
+                <p class="stat-label">Interpolated lookups</p>
+                <p class="stat-value" id="statInterpolatedQueries">0</p>
+              </article>
+            </div>
+          </section>
 
-        <div class="result-grid" id="resultGrid"></div>
+          <section class="panel">
+            <h2>Query History</h2>
+            <div class="table-wrap">
+              <table class="data-table" id="historyTable">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Timestamp</th>
+                    <th>Fluid</th>
+                    <th>Table</th>
+                    <th>Type</th>
+                    <th>Inputs</th>
+                    <th>Method</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                  <tr>
+                    <td colspan="7" class="empty-cell">No queries yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
 
-        <details class="steps" open>
-          <summary>Calculation steps</summary>
-          <ol id="stepsList"></ol>
-        </details>
+      <section class="tab-panel" id="tab-compare">
+        <section class="panel">
+          <h2>Compare Lookups</h2>
+          <p class="status">Every compute run in Property Lookup is automatically added here.</p>
+          <div class="table-wrap">
+            <table class="data-table" id="compareTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Fluid</th>
+                  <th>Table Type</th>
+                  <th>T</th>
+                  <th>P</th>
+                  <th>h_g</th>
+                  <th>s_g</th>
+                  <th>v_g</th>
+                  <th>Timestamp</th>
+                </tr>
+              </thead>
+              <tbody id="compareTableBody">
+                <tr>
+                  <td colspan="9" class="empty-cell">No comparison rows yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-cycle">
+        <div class="cycle-layout">
+          <section class="panel cycle-controls">
+            <h2>Cycle Plotter Controls</h2>
+
+            <label for="cycleDiagramSelect">Diagram</label>
+            <select id="cycleDiagramSelect">
+              <option value="Ts">T-s</option>
+              <option value="Ph">P-h</option>
+              <option value="hs">h-s</option>
+            </select>
+
+            <label for="cycleTemplateSelect">Template</label>
+            <select id="cycleTemplateSelect"></select>
+            <button type="button" id="loadTemplateBtn">Load Template</button>
+
+            <label class="check-label">
+              <input type="checkbox" id="toggleDome" checked />
+              Show saturation dome
+            </label>
+            <label class="check-label">
+              <input type="checkbox" id="toggleIsobars" />
+              Show isobar overlays
+            </label>
+
+            <h3>Manual state point</h3>
+            <label for="manualLabel">Label</label>
+            <input id="manualLabel" type="text" placeholder="e.g. M1" />
+
+            <label for="manualT">T</label>
+            <input id="manualT" type="number" step="any" placeholder="Temperature" />
+
+            <label for="manualP">P</label>
+            <input id="manualP" type="number" step="any" placeholder="Pressure" />
+
+            <label for="manualH">h</label>
+            <input id="manualH" type="number" step="any" placeholder="Enthalpy" />
+
+            <label for="manualS">s</label>
+            <input id="manualS" type="number" step="any" placeholder="Entropy" />
+
+            <button type="button" id="addManualPointBtn">Add Point</button>
+            <button type="button" class="btn-secondary" id="clearManualPointsBtn">Clear Manual Points</button>
+
+            <p class="status" id="cycleStatus">Load a cycle template to start plotting.</p>
+          </section>
+
+          <section class="panel cycle-main">
+            <h2>Cycle Diagram</h2>
+            <div class="canvas-wrap">
+              <canvas id="cycleCanvas" width="1120" height="580"></canvas>
+            </div>
+
+            <div class="cycle-bottom">
+              <section class="panel inner-panel">
+                <h3>Performance</h3>
+                <ul class="metric-list" id="cycleMetrics">
+                  <li>No cycle metrics yet.</li>
+                </ul>
+              </section>
+
+              <section class="panel inner-panel">
+                <h3>State Points</h3>
+                <div class="table-wrap">
+                  <table class="data-table" id="cyclePointsTable">
+                    <thead>
+                      <tr>
+                        <th>Point</th>
+                        <th>T</th>
+                        <th>P</th>
+                        <th>h</th>
+                        <th>s</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cyclePointsBody">
+                      <tr>
+                        <td colspan="5" class="empty-cell">No state points loaded.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
       </section>
     </main>
 
