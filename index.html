@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ThermoLookup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-a"></div>
+    <div class="bg-glow bg-glow-b"></div>
+
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Mechanical Engineering Utility</p>
+        <h1>ThermoLookup</h1>
+        <p class="subtitle">Direct thermodynamic lookup from your bundled dataset.</p>
+      </div>
+      <div class="dataset-pill" id="datasetMeta">Loading dataset...</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel controls">
+        <h2>Tables</h2>
+        <label for="tableSearch">Search</label>
+        <input id="tableSearch" type="text" placeholder="water, ammonia, R-134a..." />
+
+        <label for="tableSelect">Select table</label>
+        <select id="tableSelect"></select>
+
+        <div class="table-meta" id="tableMeta"></div>
+
+        <form id="queryForm" class="query-form">
+          <h3>Query</h3>
+          <div id="queryFields"></div>
+          <button type="submit" id="queryBtn">Interpolate</button>
+        </form>
+      </section>
+
+      <section class="panel results">
+        <h2>Results</h2>
+        <p class="status" id="statusText">Select a table and enter values to begin.</p>
+
+        <div class="result-grid" id="resultGrid"></div>
+
+        <details class="steps" open>
+          <summary>Calculation steps</summary>
+          <ol id="stepsList"></ol>
+        </details>
+      </section>
+    </main>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

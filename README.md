@@ -1,88 +1,84 @@
 # ThermoLookup
 
-A lightweight thermodynamic property lookup tool for mechanical engineering students, built with an SaaS-ready direction.
+ThermoLookup is a thermodynamic property interpolation tool for mechanical engineering students.
 
-ThermoLookup lets you load your own Excel tables (`.xlsx`, `.xls`, `.xlsm`, `.csv`), map columns, and query interpolated values with full working steps shown.
+This version is rebuilt to use your bundled workbook data directly. Users do **not** upload any file.
 
-## Why This Exists
+## What it does
 
-Most students waste time manually searching steam/air/refrigerant tables and repeating interpolation by hand.
+- Loads normalized tables from `data/thermo_tables.json`
+- Supports:
+  - Saturated tables by temperature (`sat-T`)
+  - Saturated tables by pressure (`sat-P`)
+  - 2D tables by temperature + pressure (`PT`)
+- Computes interpolated properties and shows calculation steps
+- Works as a static web app
 
-This project focuses on:
-- faster property lookup during study/problem-solving
-- transparent interpolation steps (so you still learn the method)
-- support for your own class/lab data files
+## Data flow
 
-## Current Features
-
-- Drag-and-drop Excel/CSV table loading
-- Multi-sheet dataset support
-- Auto-detection for common thermo table formats
-- Configurable table types:
-  - Saturated by temperature (`sat-T`)
-  - Saturated by pressure (`sat-P`)
-  - Superheated (`T + P`)
-  - Ideal gas (`T`-based)
-  - Subcooled/compressed liquid (`T + P`)
-- 1D linear interpolation
-- 2D (bilinear-style) interpolation for `T + P`
-- Calculation steps/work panel for learning + verification
-- Fully client-side (works offline; data stays local)
-
-## Tech Stack
-
-- Single-page HTML/CSS/JavaScript app
-- [SheetJS](https://github.com/SheetJS/sheetjs) (`xlsx`) for Excel parsing in browser
-
-## Quick Start
-
-1. Clone the repo:
-   ```bash
-   git clone <your-repo-url>
-   cd thermo-lookup
-   ```
-2. Open `thermo-lookup.html` in your browser.
-3. Drag your Excel file into the app.
-4. Configure sheet type/columns and start querying.
-
-Optional local server (recommended for consistent browser behavior):
-```bash
-python -m http.server 8080
-```
-Then open `http://localhost:8080/thermo-lookup.html`.
-
-## Included Data
-
-This repo currently includes:
+Source workbook:
 - `Themodynamic and Transport Properties.xlsm`
 
-You can replace this with your own class/lab/property datasets.
+Build pipeline:
+1. `scripts/build_dataset.py` parses the workbook
+2. Outputs `data/thermo_tables.json`
+3. Frontend (`index.html`, `styles.css`, `app.js`) consumes JSON directly
 
-## SaaS Direction (Roadmap)
+## Quick start
 
-Planned evolution from utility to SaaS:
-- user accounts + saved table configurations
-- cloud-hosted curated property datasets
-- team/class workspaces
-- shareable query links and reports
-- API access for integration into calculators and simulation tools
+1. Clone:
+   ```bash
+   git clone https://github.com/le-nicolas/thermo-lookup.git
+   cd thermo-lookup
+   ```
+2. Install Python dependency (for dataset rebuild):
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run a local server:
+   ```bash
+   python -m http.server 8080
+   ```
+4. Open:
+   - `http://localhost:8080/index.html`
 
-## Project Structure
+## Rebuild dataset (after workbook changes)
+
+```bash
+python scripts/build_dataset.py
+```
+
+Optional explicit paths:
+```bash
+python scripts/build_dataset.py --input "Themodynamic and Transport Properties.xlsm" --output data/thermo_tables.json
+```
+
+## Project structure
 
 ```text
 thermo-lookup/
+  index.html
+  styles.css
+  app.js
   thermo-lookup.html
   Themodynamic and Transport Properties.xlsm
+  data/
+    thermo_tables.json
+  scripts/
+    build_dataset.py
   README.md
+  LICENSE
 ```
 
-## Contributions
+## SaaS-ready direction
 
-Contributions are welcome, especially from mechanical engineering students who want:
-- better UX for exam/lab workflows
-- more property table templates
-- validation tests against textbook/reference data
+Next product steps:
+- authenticated user accounts
+- saved queries and favorite tables
+- API endpoints for interpolation
+- classroom/team workspaces
+- paid plans for advanced datasets and exports
 
 ## License
 
-No license has been added yet. Add one (for example, MIT) before public open-source distribution.
+MIT (`LICENSE`).
