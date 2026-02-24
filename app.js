@@ -238,6 +238,7 @@ const el = {
   cycleTargetValue2: document.getElementById("cycleTargetValue2"),
   cycleSolveMin2: document.getElementById("cycleSolveMin2"),
   cycleSolveMax2: document.getElementById("cycleSolveMax2"),
+  cycleDofMessage: document.getElementById("cycleDofMessage"),
   cycleInverseMessage: document.getElementById("cycleInverseMessage"),
   solveUnknownBtn: document.getElementById("solveUnknownBtn"),
   toggleDome: document.getElementById("toggleDome"),
@@ -339,6 +340,17 @@ function setCycleInverseMessage(message, kind = "") {
   el.cycleInverseMessage.className = "validation-msg";
   if (kind) {
     el.cycleInverseMessage.classList.add(kind);
+  }
+}
+
+function setCycleDofMessage(message, kind = "") {
+  if (!el.cycleDofMessage) {
+    return;
+  }
+  el.cycleDofMessage.textContent = message;
+  el.cycleDofMessage.className = "validation-msg";
+  if (kind) {
+    el.cycleDofMessage.classList.add(kind);
   }
 }
 
@@ -2512,6 +2524,103 @@ function renderCycleInputFields(templateId) {
   setCycleInputMessage("Update inputs and click Solve Cycle.");
 }
 
+function safeFiniteFromInput(inputEl) {
+  if (!inputEl) {
+    return { present: false, valid: true, value: null };
+  }
+  const raw = inputEl.value.trim();
+  if (!raw) {
+    return { present: false, valid: true, value: null };
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return { present: true, valid: false, value: null };
+  }
+  return { present: true, valid: true, value };
+}
+
+function cycleInverseDofState() {
+  const unknown1 = el.cycleUnknownSelect?.value || "";
+  const unknown2 = el.cycleUnknownSelect2?.value || "none";
+  const target1 = el.cycleTargetMetricSelect?.value || "";
+  const target2 = el.cycleTargetMetricSelect2?.value || "none";
+
+  const targetValue1 = safeFiniteFromInput(el.cycleTargetValue);
+  const targetValue2 = safeFiniteFromInput(el.cycleTargetValue2);
+
+  if (targetValue1.present && !targetValue1.valid) {
+    return { canSolve: false, kind: "error", message: "Target value #1 must be numeric.", unknownCount: 0, equationCount: 0 };
+  }
+  if (targetValue2.present && !targetValue2.valid) {
+    return { canSolve: false, kind: "error", message: "Target value #2 must be numeric.", unknownCount: 0, equationCount: 0 };
+  }
+
+  const unknownCount = (unknown1 && unknown1 !== "none" ? 1 : 0) + (unknown2 && unknown2 !== "none" ? 1 : 0);
+
+  if (!unknown1 || unknown1 === "none") {
+    return { canSolve: false, kind: "warn", message: "Select unknown input #1.", unknownCount, equationCount: 0 };
+  }
+  if (unknown2 !== "none" && unknown2 === unknown1) {
+    return { canSolve: false, kind: "warn", message: "Unknown inputs must be different.", unknownCount, equationCount: 0 };
+  }
+
+  if (!target1 || target1 === "none") {
+    return { canSolve: false, kind: "warn", message: "Select target metric #1.", unknownCount, equationCount: 0 };
+  }
+  if (!targetValue1.present) {
+    return { canSolve: false, kind: "warn", message: "Enter target value #1.", unknownCount, equationCount: 0 };
+  }
+
+  const target2Requested = (target2 && target2 !== "none") || targetValue2.present;
+  if (target2Requested) {
+    if (target2 === "none") {
+      return { canSolve: false, kind: "warn", message: "Choose target metric #2 or clear target value #2.", unknownCount, equationCount: 1 };
+    }
+    if (!targetValue2.present) {
+      return { canSolve: false, kind: "warn", message: "Enter target value #2 for the second equation.", unknownCount, equationCount: 1 };
+    }
+  }
+
+  if (target2 !== "none" && target2 === target1) {
+    return { canSolve: false, kind: "warn", message: "Target metrics must be different.", unknownCount, equationCount: 1 };
+  }
+
+  const equationCount = 1 + (target2Requested ? 1 : 0);
+  if (unknownCount !== equationCount) {
+    return {
+      canSolve: false,
+      kind: "warn",
+      message: `DOF mismatch: ${unknownCount} unknown(s), ${equationCount} equation(s).`,
+      unknownCount,
+      equationCount,
+    };
+  }
+
+  return {
+    canSolve: true,
+    kind: "ok",
+    message: `DOF balanced: ${unknownCount} unknown(s), ${equationCount} equation(s). Ready to solve.`,
+    unknownCount,
+    equationCount,
+  };
+}
+
+function refreshCycleDofStatus(validConfig = true) {
+  if (!validConfig) {
+    setCycleDofMessage("DOF check unavailable for this template.", "warn");
+    if (el.solveUnknownBtn) {
+      el.solveUnknownBtn.disabled = true;
+    }
+    return;
+  }
+
+  const status = cycleInverseDofState();
+  setCycleDofMessage(status.message, status.kind);
+  if (el.solveUnknownBtn) {
+    el.solveUnknownBtn.disabled = !status.canSolve;
+  }
+}
+
 function renderCycleInverseControls(templateId) {
   if (!el.cycleUnknownSelect || !el.cycleTargetMetricSelect || !el.cycleUnknownSelect2 || !el.cycleTargetMetricSelect2) {
     return;
@@ -2577,10 +2686,10 @@ function renderCycleInverseControls(templateId) {
   el.cycleTargetValue2.disabled = !validConfig;
   el.cycleSolveMin2.disabled = !validConfig;
   el.cycleSolveMax2.disabled = !validConfig;
-  el.solveUnknownBtn.disabled = !validConfig;
 
   if (!validConfig) {
     setCycleInverseMessage("Unknown solver is unavailable for this template.", "warn");
+    refreshCycleDofStatus(false);
     return;
   }
 
@@ -2596,6 +2705,7 @@ function renderCycleInverseControls(templateId) {
   el.cycleSolveMax2.value = Number.isFinite(config.max2) ? String(config.max2) : "";
 
   setCycleInverseMessage("Set 1 unknown + 1 target, or 2 unknowns + 2 targets, then click Solve Unknown.");
+  refreshCycleDofStatus(true);
 }
 
 function satStateAtPressure(table, pressure, props) {
@@ -4203,6 +4313,7 @@ function wireCycleEvents() {
     el.cycleUnknownSelect.addEventListener("change", () => {
       const config = cycleInverseInputsForTemplate(state.cycle.templateId);
       config.unknownKey = el.cycleUnknownSelect.value;
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4210,6 +4321,7 @@ function wireCycleEvents() {
     el.cycleTargetMetricSelect.addEventListener("change", () => {
       const config = cycleInverseInputsForTemplate(state.cycle.templateId);
       config.targetKey = el.cycleTargetMetricSelect.value;
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4217,6 +4329,7 @@ function wireCycleEvents() {
     el.cycleUnknownSelect2.addEventListener("change", () => {
       const config = cycleInverseInputsForTemplate(state.cycle.templateId);
       config.unknownKey2 = el.cycleUnknownSelect2.value || "none";
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4224,6 +4337,7 @@ function wireCycleEvents() {
     el.cycleTargetMetricSelect2.addEventListener("change", () => {
       const config = cycleInverseInputsForTemplate(state.cycle.templateId);
       config.targetKey2 = el.cycleTargetMetricSelect2.value || "none";
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4236,6 +4350,7 @@ function wireCycleEvents() {
         const value = Number(el.cycleTargetValue.value);
         config.targetValue = Number.isFinite(value) ? value : "";
       }
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4248,6 +4363,7 @@ function wireCycleEvents() {
         const value = Number(el.cycleSolveMin.value);
         config.min = Number.isFinite(value) ? value : "";
       }
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4260,6 +4376,7 @@ function wireCycleEvents() {
         const value = Number(el.cycleSolveMax.value);
         config.max = Number.isFinite(value) ? value : "";
       }
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4272,6 +4389,7 @@ function wireCycleEvents() {
         const value = Number(el.cycleTargetValue2.value);
         config.targetValue2 = Number.isFinite(value) ? value : "";
       }
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4284,6 +4402,7 @@ function wireCycleEvents() {
         const value = Number(el.cycleSolveMin2.value);
         config.min2 = Number.isFinite(value) ? value : "";
       }
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4296,6 +4415,7 @@ function wireCycleEvents() {
         const value = Number(el.cycleSolveMax2.value);
         config.max2 = Number.isFinite(value) ? value : "";
       }
+      refreshCycleDofStatus(true);
     });
   }
 
@@ -4360,6 +4480,7 @@ async function loadDataset() {
     setWorkflowStatus("Workflow panel unavailable until dataset is loaded.", "error");
     setCycleInputMessage("Cycle inputs unavailable until dataset is loaded.", "error");
     setCycleInverseMessage("Unknown solver unavailable until dataset is loaded.", "error");
+    setCycleDofMessage("DOF check unavailable until dataset is loaded.", "error");
     setCycleStatus("Cycle plotter unavailable until dataset is loaded.", "error");
   } finally {
     setLookupLoading(false);
