@@ -1,6 +1,6 @@
-# ThermoLookup
+# Digital ThermoTable
 
-ThermoLookup is a thermodynamic property interpolation tool for mechanical engineering students.
+ThermoLookup(just given a name) is a thermodynamic property interpolation tool for mechanical engineering students.
 
 
 <img width="1919" height="990" alt="image" src="https://github.com/user-attachments/assets/ee15ac62-ad32-4f9e-91ba-4e408b55da41" />
