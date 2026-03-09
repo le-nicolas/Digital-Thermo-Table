@@ -25,10 +25,11 @@ Digital Thermo Table is a browser-based thermodynamic and psychrometric property
 - Includes an interactive `Psychrometric Chart` tab:
   - Solve moist-air states from `dry-bulb + RH`, `W`, `wet-bulb`, `dew point`, or `enthalpy`
   - Switch between `ASHRAE Page 1` Imperial units and `ASHRAE Page 2` SI units
-  - Uses the bundled ASHRAE reference PDF as the visual chart background instead of a generic custom redraw
+  - Uses bundled ASHRAE chart images as the visual background instead of a generic custom redraw
   - Live hover preview on the chart so values update continuously as the mouse moves
   - Click the chart to lock a state and read all calculated properties
   - Add multiple states to a visible psychrometric process path
+  - Shows an explicit accuracy note so the overlay is treated as chart-guided, not exact ASHRAE digitization
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app
 
@@ -61,6 +62,11 @@ Build pipeline:
 4. Open:
    - `http://localhost:8080/index.html`
 
+5. Run the psychrometric validation harness:
+   ```bash
+   node scripts/validate_psychrometrics.js
+   ```
+
 Tabs available in the app:
 - `Property Lookup`
 - `Problem Workflows`
@@ -80,6 +86,20 @@ Optional explicit paths:
 python scripts/build_dataset.py --input "Themodynamic and Transport Properties.xlsm" --output data/thermo_tables.json
 ```
 
+## Psychrometric Validation
+
+The psychrometric solver is validated in two layers:
+
+- `scripts/psychrometric_benchmarks.json` defines internal benchmarks, official ASHRAE worked examples in both SI and IP units, and edge-region checks near saturation, low humidity, and hot/humid limits.
+- `scripts/validate_psychrometrics.js` runs those cases with the same equations used by the frontend and reports pass/fail.
+
+Official benchmark sources used in the harness:
+
+- ASHRAE Handbook Fundamentals 2021 SI, Chapter 1 Psychrometrics
+- ASHRAE Handbook Fundamentals 2017 IP, Chapter 1 Psychrometrics
+
+This validates the equation-based solver directly. The interactive chart overlay is still an image-calibrated reading aid, so cursor placement should be treated as approximate alignment to the printed chart rather than a formal digital reproduction.
+
 ## Project Structure
 
 ```text
@@ -89,11 +109,14 @@ digital-thermo-table/
   app.js
   Themodynamic and Transport Properties.xlsm
   assets/
-    ASHRAE-PSYCHROMETRIC-CHART.pdf
+    Imperial.png
+    SI.png
   data/
     thermo_tables.json
   scripts/
     build_dataset.py
+    psychrometric_benchmarks.json
+    validate_psychrometrics.js
   README.md
   LICENSE
 ```

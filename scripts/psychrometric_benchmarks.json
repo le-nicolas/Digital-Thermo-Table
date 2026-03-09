@@ -1,0 +1,392 @@
+{
+  "sources": [
+    {
+      "id": "ashrae-si-2021",
+      "title": "ASHRAE Handbook Fundamentals 2021 SI, Chapter 1 Psychrometrics",
+      "url": "https://handbook.ashrae.org/Handbooks/F21/SI/F21_Ch01/F21_Ch01_si.aspx"
+    },
+    {
+      "id": "ashrae-ip-2017",
+      "title": "ASHRAE Handbook Fundamentals 2017 IP, Chapter 1 Psychrometrics",
+      "url": "https://handbook.ashrae.org/Handbooks/F17/IP/F17_Ch01/F17_Ch01_ip.aspx"
+    }
+  ],
+  "cases": [
+    {
+      "id": "internal-basic-si",
+      "group": "internal",
+      "label": "Basic state point at 28 C and 60% RH",
+      "system": "SI",
+      "input": {
+        "tdb": 28,
+        "secondType": "rh",
+        "secondValue": 60,
+        "pressure": 101.325
+      },
+      "expected": {
+        "twb": 22.0,
+        "tdp": 19.5,
+        "rh": 60.0,
+        "w": 0.01425,
+        "h": 64.54,
+        "v": 0.8727
+      },
+      "tolerance": {
+        "twb": 0.5,
+        "tdp": 0.5,
+        "rh": 0.5,
+        "w": 0.0005,
+        "h": 0.6,
+        "v": 0.01
+      }
+    },
+    {
+      "id": "internal-heating-inlet-si",
+      "group": "internal",
+      "label": "Sensible heating inlet at 15 C and 80% RH",
+      "system": "SI",
+      "input": {
+        "tdb": 15,
+        "secondType": "rh",
+        "secondValue": 80,
+        "pressure": 101.325
+      },
+      "expected": {
+        "w": 0.00849,
+        "h": 36.55,
+        "tdp": 11.6
+      },
+      "tolerance": {
+        "w": 0.0004,
+        "h": 0.5,
+        "tdp": 0.5
+      }
+    },
+    {
+      "id": "internal-heating-exit-si",
+      "group": "internal",
+      "label": "Sensible heating exit at 30 C with constant humidity ratio",
+      "system": "SI",
+      "input": {
+        "tdb": 30,
+        "secondType": "w",
+        "secondValue": 0.00849,
+        "pressure": 101.325
+      },
+      "expected": {
+        "rh": 32.1,
+        "twb": 18.3,
+        "tdp": 11.6,
+        "w": 0.00849,
+        "h": 51.88,
+        "v": 0.8705
+      },
+      "tolerance": {
+        "rh": 1.0,
+        "twb": 0.5,
+        "tdp": 0.5,
+        "w": 0.0004,
+        "h": 0.6,
+        "v": 0.01
+      }
+    },
+    {
+      "id": "ashrae-si-example-1",
+      "group": "ashrae",
+      "sourceId": "ashrae-si-2021",
+      "label": "ASHRAE SI Example 1, 40 C dry-bulb and 20 C wet-bulb",
+      "system": "SI",
+      "input": {
+        "tdb": 40,
+        "secondType": "twb",
+        "secondValue": 20,
+        "pressure": 101.325
+      },
+      "expected": {
+        "rh": 14.0,
+        "tdp": 7.0,
+        "w": 0.0065,
+        "h": 56.7,
+        "v": 0.896
+      },
+      "tolerance": {
+        "rh": 1.0,
+        "tdp": 1.2,
+        "w": 0.0005,
+        "h": 0.8,
+        "v": 0.015
+      }
+    },
+    {
+      "id": "ashrae-si-example-2-state-1",
+      "group": "ashrae",
+      "sourceId": "ashrae-si-2021",
+      "label": "ASHRAE SI Example 2 inlet saturated at 2 C",
+      "system": "SI",
+      "input": {
+        "tdb": 2,
+        "secondType": "rh",
+        "secondValue": 100,
+        "pressure": 101.325
+      },
+      "expected": {
+        "w": 0.00438,
+        "h": 13.0,
+        "v": 0.785
+      },
+      "tolerance": {
+        "w": 0.0003,
+        "h": 0.4,
+        "v": 0.01
+      }
+    },
+    {
+      "id": "ashrae-si-example-2-state-2",
+      "group": "ashrae",
+      "sourceId": "ashrae-si-2021",
+      "label": "ASHRAE SI Example 2 exit at 40 C after sensible heating",
+      "system": "SI",
+      "input": {
+        "tdb": 40,
+        "secondType": "w",
+        "secondValue": 0.00438,
+        "pressure": 101.325
+      },
+      "expected": {
+        "h": 51.5
+      },
+      "tolerance": {
+        "h": 0.8
+      }
+    },
+    {
+      "id": "ashrae-si-example-3-state-1",
+      "group": "ashrae",
+      "sourceId": "ashrae-si-2021",
+      "label": "ASHRAE SI Example 3 inlet at 30 C and 50% RH",
+      "system": "SI",
+      "input": {
+        "tdb": 30,
+        "secondType": "rh",
+        "secondValue": 50,
+        "pressure": 101.325
+      },
+      "expected": {
+        "w": 0.0133,
+        "h": 64.3,
+        "v": 0.877
+      },
+      "tolerance": {
+        "w": 0.0006,
+        "h": 0.8,
+        "v": 0.015
+      }
+    },
+    {
+      "id": "ashrae-si-example-3-state-2",
+      "group": "ashrae",
+      "sourceId": "ashrae-si-2021",
+      "label": "ASHRAE SI Example 3 outlet at 10 C saturated",
+      "system": "SI",
+      "input": {
+        "tdb": 10,
+        "secondType": "rh",
+        "secondValue": 100,
+        "pressure": 101.325
+      },
+      "expected": {
+        "w": 0.00766,
+        "h": 29.5
+      },
+      "tolerance": {
+        "w": 0.0004,
+        "h": 0.6
+      }
+    },
+    {
+      "id": "ashrae-ip-example-1",
+      "group": "ashrae",
+      "sourceId": "ashrae-ip-2017",
+      "label": "ASHRAE IP Example 1, 100 F dry-bulb and 65 F wet-bulb",
+      "system": "IP",
+      "input": {
+        "tdb": 100,
+        "secondType": "twb",
+        "secondValue": 65,
+        "pressure": 14.696
+      },
+      "expected": {
+        "rh": 13.0,
+        "tdp": 40.0,
+        "w": 0.00523,
+        "h": 29.8,
+        "v": 14.22
+      },
+      "tolerance": {
+        "rh": 1.0,
+        "tdp": 1.5,
+        "w": 0.0003,
+        "h": 0.6,
+        "v": 0.15
+      }
+    },
+    {
+      "id": "ashrae-ip-example-2-state-1",
+      "group": "ashrae",
+      "sourceId": "ashrae-ip-2017",
+      "label": "ASHRAE IP Example 2 inlet saturated at 35 F",
+      "system": "IP",
+      "input": {
+        "tdb": 35,
+        "secondType": "rh",
+        "secondValue": 100,
+        "pressure": 14.696
+      },
+      "expected": {
+        "w": 0.00428,
+        "h": 13.01,
+        "v": 12.55
+      },
+      "tolerance": {
+        "w": 0.0003,
+        "h": 0.4,
+        "v": 0.12
+      }
+    },
+    {
+      "id": "ashrae-ip-example-2-state-2",
+      "group": "ashrae",
+      "sourceId": "ashrae-ip-2017",
+      "label": "ASHRAE IP Example 2 exit at 100 F after sensible heating",
+      "system": "IP",
+      "input": {
+        "tdb": 100,
+        "secondType": "w",
+        "secondValue": 0.00428,
+        "pressure": 14.696
+      },
+      "expected": {
+        "h": 28.77
+      },
+      "tolerance": {
+        "h": 0.6
+      }
+    },
+    {
+      "id": "ashrae-ip-example-3-state-1",
+      "group": "ashrae",
+      "sourceId": "ashrae-ip-2017",
+      "label": "ASHRAE IP Example 3 inlet at 85 F and 50% RH",
+      "system": "IP",
+      "input": {
+        "tdb": 85,
+        "secondType": "rh",
+        "secondValue": 50,
+        "pressure": 14.696
+      },
+      "expected": {
+        "w": 0.01292,
+        "h": 34.62,
+        "v": 14.01
+      },
+      "tolerance": {
+        "w": 0.0005,
+        "h": 0.8,
+        "v": 0.15
+      }
+    },
+    {
+      "id": "ashrae-ip-example-3-state-2",
+      "group": "ashrae",
+      "sourceId": "ashrae-ip-2017",
+      "label": "ASHRAE IP Example 3 outlet at 50 F saturated",
+      "system": "IP",
+      "input": {
+        "tdb": 50,
+        "secondType": "rh",
+        "secondValue": 100,
+        "pressure": 14.696
+      },
+      "expected": {
+        "w": 0.00766,
+        "h": 20.30
+      },
+      "tolerance": {
+        "w": 0.0004,
+        "h": 0.6
+      }
+    },
+    {
+      "id": "edge-si-near-saturation",
+      "group": "edge",
+      "label": "Near saturation in SI region",
+      "system": "SI",
+      "input": {
+        "tdb": 4,
+        "secondType": "rh",
+        "secondValue": 99,
+        "pressure": 101.325
+      }
+    },
+    {
+      "id": "edge-si-low-humidity",
+      "group": "edge",
+      "label": "Very dry hot SI region",
+      "system": "SI",
+      "input": {
+        "tdb": 45,
+        "secondType": "rh",
+        "secondValue": 5,
+        "pressure": 101.325
+      }
+    },
+    {
+      "id": "edge-si-upper-right",
+      "group": "edge",
+      "label": "High temperature and high humidity SI region",
+      "system": "SI",
+      "input": {
+        "tdb": 48,
+        "secondType": "rh",
+        "secondValue": 85,
+        "pressure": 101.325
+      }
+    },
+    {
+      "id": "edge-ip-near-saturation",
+      "group": "edge",
+      "label": "Near saturation in IP region",
+      "system": "IP",
+      "input": {
+        "tdb": 35,
+        "secondType": "rh",
+        "secondValue": 98,
+        "pressure": 14.696
+      }
+    },
+    {
+      "id": "edge-ip-low-humidity",
+      "group": "edge",
+      "label": "Very dry hot IP region",
+      "system": "IP",
+      "input": {
+        "tdb": 110,
+        "secondType": "rh",
+        "secondValue": 5,
+        "pressure": 14.696
+      }
+    },
+    {
+      "id": "edge-ip-upper-right",
+      "group": "edge",
+      "label": "High temperature and high humidity IP region",
+      "system": "IP",
+      "input": {
+        "tdb": 115,
+        "secondType": "rh",
+        "secondValue": 75,
+        "pressure": 14.696
+      }
+    }
+  ]
+}

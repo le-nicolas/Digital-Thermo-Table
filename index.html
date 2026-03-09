@@ -345,6 +345,7 @@
           <section class="panel psych-controls">
             <h2>Digital Psychrometric Solver</h2>
             <p class="status psych-note">Use the actual ASHRAE page as the chart background. Pick Imperial page 1 or SI page 2, then enter dry-bulb plus one companion property.</p>
+            <p class="psych-accuracy-note">Accuracy note: solved properties are equation-based and benchmarked against worked ASHRAE examples. The on-screen cursor is chart-guided and calibrated to the bundled chart images, so use it as a reading aid rather than a claim of exact ASHRAE digitization.</p>
 
             <form id="psychForm" class="query-form">
               <div class="query-field">
@@ -389,8 +390,8 @@
             <p class="status" id="psychStatus">Hover to preview values. Click to lock a state. The background switches between ASHRAE page 1 and page 2.</p>
 
             <div class="canvas-wrap psych-canvas-wrap psych-chart-stage">
-              <img id="psychChartImage" alt="ASHRAE psychrometric chart background" src="assets/psych-page1-app.png" />
-              <canvas id="psychCanvas" width="985" height="744"></canvas>
+              <img id="psychChartImage" alt="ASHRAE psychrometric chart background" src="assets/Imperial.png" />
+              <canvas id="psychCanvas" width="993" height="755"></canvas>
             </div>
 
             <div class="result-grid" id="psychResultGrid"></div>

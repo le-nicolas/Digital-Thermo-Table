@@ -534,6 +534,17 @@ function currentPsychConfig() {
   return PSYCH_SYSTEMS[state.psych.chartSystem] || PSYCH_SYSTEMS.SI;
 }
 
+function psychDisplayEnthalpy(point, config = currentPsychConfig()) {
+  if (!point) {
+    return null;
+  }
+  if (config.code === "IP") {
+    const tdbDisplay = config.tempFromInternal(point.tdb);
+    return 0.24 * tdbDisplay + point.w * (1061 + 0.444 * tdbDisplay);
+  }
+  return point.h;
+}
+
 function psychSaturationPressure(tC) {
   if (!Number.isFinite(tC)) {
     return null;
@@ -699,8 +710,12 @@ function solvePsychrometrics({ tdb, secondType, secondValue, pressure, system })
     steps.push(`Second property: Tdp = ${formatNumber(secondValue)} ${config.tempUnit}.`);
     steps.push(`At dew point, Pw = Pws(Tdp), so W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else if (secondType === "h") {
-    const hInternal = config.enthalpyToInternal(secondValue);
-    w = (hInternal - 1.006 * tdbInternal) / (2501 + 1.86 * tdbInternal);
+    if (config.code === "IP") {
+      w = (secondValue - 0.24 * tdb) / (1061 + 0.444 * tdb);
+    } else {
+      const hInternal = config.enthalpyToInternal(secondValue);
+      w = (hInternal - 1.006 * tdbInternal) / (2501 + 1.86 * tdbInternal);
+    }
     steps.push(`Second property: h = ${formatNumber(secondValue)} ${config.enthalpyUnit}.`);
     steps.push(`Back-solved humidity ratio W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else if (secondType === "twb") {
@@ -709,8 +724,13 @@ function solvePsychrometrics({ tdb, secondType, secondValue, pressure, system })
       throw new Error("Wet-bulb temperature cannot exceed dry-bulb temperature.");
     }
     const wsTwb = psychSaturationHumidityRatio(twbInternal, pressureInternal);
-    const hSatTwb = psychEnthalpy(twbInternal, wsTwb);
-    w = (hSatTwb - 1.006 * tdbInternal) / (2501 + 1.86 * tdbInternal);
+    if (config.code === "IP") {
+      const hSatTwb = 0.24 * secondValue + wsTwb * (1061 + 0.444 * secondValue);
+      w = (hSatTwb - 0.24 * tdb) / (1061 + 0.444 * tdb);
+    } else {
+      const hSatTwb = psychEnthalpy(twbInternal, wsTwb);
+      w = (hSatTwb - 1.006 * tdbInternal) / (2501 + 1.86 * tdbInternal);
+    }
     steps.push(`Second property: Twb = ${formatNumber(secondValue)} ${config.tempUnit}.`);
     steps.push(`Using the wet-bulb enthalpy relation, W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else {
@@ -723,7 +743,7 @@ function solvePsychrometrics({ tdb, secondType, secondValue, pressure, system })
     `Solved Twb = ${formatNumber(config.tempFromInternal(solved.twb))} ${config.tempUnit}, Tdp = ${formatNumber(config.tempFromInternal(solved.tdp))} ${config.tempUnit}.`,
   );
   steps.push(
-    `Solved h = ${formatNumber(config.enthalpyFromInternal(solved.h))} ${config.enthalpyUnit}, v = ${formatNumber(config.volumeFromInternal(solved.v))} ${config.volumeUnit}.`,
+    `Solved h = ${formatNumber(psychDisplayEnthalpy(solved, config))} ${config.enthalpyUnit}, v = ${formatNumber(config.volumeFromInternal(solved.v))} ${config.volumeUnit}.`,
   );
   return { point: solved, steps };
 }
@@ -740,7 +760,7 @@ function psychResultItems(point) {
     { label: "RH", value: Number.isFinite(point.rh) ? point.rh * 100 : null, desc: "Relative humidity", unit: "%" },
     { label: "W", value: point.w, desc: "Humidity ratio", unit: config.humidityRatioUnit },
     { label: config.code === "IP" ? "gr/lb" : "g/kg", value: config.moistureFromInternal(point.w), desc: "Moisture content", unit: config.moistureUnit },
-    { label: "h", value: config.enthalpyFromInternal(point.h), desc: "Specific enthalpy", unit: config.enthalpyUnit },
+    { label: "h", value: psychDisplayEnthalpy(point, config), desc: "Specific enthalpy", unit: config.enthalpyUnit },
     { label: "v", value: config.volumeFromInternal(point.v), desc: "Specific volume", unit: config.volumeUnit },
     { label: "Pw", value: config.pressureFromInternal(point.pw), desc: "Water-vapor partial pressure", unit: config.pressureUnit },
     { label: "Pws", value: config.pressureFromInternal(point.pws), desc: "Saturation pressure at Tdb", unit: config.pressureUnit },
