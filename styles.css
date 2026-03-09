@@ -534,6 +534,26 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+.psych-system-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.psych-system-btn {
+  margin-top: 0;
+}
+
+.psych-system-btn.active {
+  background: rgba(16, 163, 127, 0.12);
+  color: var(--accent-2);
+  border-color: var(--accent);
+}
+
+.psych-system-btn.flash {
+  animation: psych-system-flash 700ms ease;
+}
+
 .psych-chart-stage {
   position: relative;
   padding: 0;
@@ -549,6 +569,21 @@ button:disabled {
   height: 100%;
   border: 0;
   pointer-events: none;
+}
+
+@keyframes psych-system-flash {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 163, 127, 0.28);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 5px rgba(16, 163, 127, 0.16);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 163, 127, 0);
+  }
 }
 
 @media (max-width: 1060px) {

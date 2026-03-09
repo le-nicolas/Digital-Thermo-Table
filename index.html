@@ -348,11 +348,11 @@
 
             <form id="psychForm" class="query-form">
               <div class="query-field">
-                <label for="psychSystem">Chart standard</label>
-                <select id="psychSystem">
-                  <option value="IP">ASHRAE Page 1: Imperial (Btu/lb dry air)</option>
-                  <option value="SI">ASHRAE Page 2: SI (kJ/kg dry air)</option>
-                </select>
+                <label>Chart standard</label>
+                <div class="psych-system-toggle" id="psychSystemToggle">
+                  <button type="button" class="btn-secondary psych-system-btn active" data-system="IP">Page 1 Imperial</button>
+                  <button type="button" class="btn-secondary psych-system-btn" data-system="SI">Page 2 SI</button>
+                </div>
               </div>
               <div class="query-field">
                 <label for="psychPressure" id="psychPressureLabel">Pressure P (psia)</label>

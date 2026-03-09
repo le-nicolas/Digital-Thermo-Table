@@ -264,7 +264,7 @@ const el = {
   cyclePointsBody: document.getElementById("cyclePointsBody"),
 
   psychForm: document.getElementById("psychForm"),
-  psychSystem: document.getElementById("psychSystem"),
+  psychSystemButtons: [...document.querySelectorAll(".psych-system-btn")],
   psychPressure: document.getElementById("psychPressure"),
   psychPressureLabel: document.getElementById("psychPressureLabel"),
   psychDryBulb: document.getElementById("psychDryBulb"),
@@ -796,6 +796,9 @@ function syncPsychUiToSystem() {
   el.psychDryBulbLabel.textContent = `Dry-bulb Tdb (${config.tempUnit})`;
   el.psychPressure.value = String(config.defaultPressure);
   el.psychDryBulb.placeholder = config.code === "IP" ? "Example: 86" : "Example: 30";
+  for (const button of el.psychSystemButtons) {
+    button.classList.toggle("active", button.dataset.system === config.code);
+  }
   updatePsychSecondPropertyLabels();
   if (el.psychChartPdf) {
     el.psychChartPdf.src = config.pdfSrc;
@@ -5105,7 +5108,7 @@ function wirePsychEvents() {
     return;
   }
 
-  state.psych.chartSystem = el.psychSystem.value;
+  state.psych.chartSystem = "IP";
   syncPsychUiToSystem();
 
   el.psychForm.addEventListener("submit", (event) => {
@@ -5121,18 +5124,23 @@ function wirePsychEvents() {
     }
   });
 
-  el.psychSystem.addEventListener("change", () => {
-    state.psych.chartSystem = el.psychSystem.value;
-    state.psych.hoverPoint = null;
-    syncPsychUiToSystem();
-    if (state.psych.currentPoint) {
-      renderPsychResults(state.psych.currentPoint, [`Showing current state on ${currentPsychConfig().title}.`]);
-    } else {
-      clearPsychResults();
-    }
-    setPsychStatus(`${currentPsychConfig().title} selected.`, "ok");
-    drawPsychChart();
-  });
+  for (const button of el.psychSystemButtons) {
+    button.addEventListener("click", () => {
+      state.psych.chartSystem = button.dataset.system;
+      state.psych.hoverPoint = null;
+      syncPsychUiToSystem();
+      button.classList.remove("flash");
+      void button.offsetWidth;
+      button.classList.add("flash");
+      if (state.psych.currentPoint) {
+        renderPsychResults(state.psych.currentPoint, [`Showing current state on ${currentPsychConfig().title}.`]);
+      } else {
+        clearPsychResults();
+      }
+      setPsychStatus(`${currentPsychConfig().title} selected.`, "ok");
+      drawPsychChart();
+    });
+  }
 
   el.psychPressure.addEventListener("input", () => {
     const pressure = Number(el.psychPressure.value);
@@ -5220,9 +5228,6 @@ function init() {
   el.cycleDiagramSelect.value = state.cycle.diagram;
   el.toggleDome.checked = state.cycle.domeVisible;
   el.toggleIsobars.checked = state.cycle.isobarsVisible;
-  if (el.psychSystem) {
-    el.psychSystem.value = state.psych.chartSystem;
-  }
 
   loadDataset();
 }
