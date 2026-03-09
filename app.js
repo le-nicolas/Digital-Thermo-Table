@@ -277,7 +277,7 @@ const el = {
   psychAddPointBtn: document.getElementById("psychAddPointBtn"),
   psychClearPointsBtn: document.getElementById("psychClearPointsBtn"),
   psychStatus: document.getElementById("psychStatus"),
-  psychChartPdf: document.getElementById("psychChartPdf"),
+  psychChartImage: document.getElementById("psychChartImage"),
   psychCanvas: document.getElementById("psychCanvas"),
   psychResultGrid: document.getElementById("psychResultGrid"),
   psychStepsList: document.getElementById("psychStepsList"),
@@ -468,7 +468,7 @@ const PSYCH_SYSTEMS = {
     enthalpyFromInternal: (value) => value / 2.326,
     volumeFromInternal: (value) => value * 16.018463,
     moistureFromInternal: (value) => value * 7000,
-    pdfSrc: "assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#page=1&view=FitH&toolbar=0&navpanes=0&scrollbar=0",
+    imageSrc: "assets/psych-page1-app.png",
     secondValueLabel: {
       rh: "Second property value (%)",
       w: "Humidity ratio W (lb/lb dry air)",
@@ -508,7 +508,7 @@ const PSYCH_SYSTEMS = {
     enthalpyFromInternal: (value) => value,
     volumeFromInternal: (value) => value,
     moistureFromInternal: (value) => value * 1000,
-    pdfSrc: "assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#page=2&view=FitH&toolbar=0&navpanes=0&scrollbar=0",
+    imageSrc: "assets/psych-page2-app.png",
     secondValueLabel: {
       rh: "Second property value (%)",
       w: "Humidity ratio W (kg/kg dry air)",
@@ -800,8 +800,8 @@ function syncPsychUiToSystem() {
     button.classList.toggle("active", button.dataset.system === config.code);
   }
   updatePsychSecondPropertyLabels();
-  if (el.psychChartPdf) {
-    el.psychChartPdf.src = config.pdfSrc;
+  if (el.psychChartImage) {
+    el.psychChartImage.src = config.imageSrc;
   }
 }
 
@@ -1063,6 +1063,9 @@ function setLookupLoading(isLoading) {
 
 function setActiveTab(tabId) {
   state.activeTab = tabId;
+  if (typeof window !== "undefined") {
+    window.location.hash = tabId;
+  }
   for (const button of el.tabButtons) {
     button.classList.toggle("active", button.dataset.tab === tabId);
   }
@@ -5218,6 +5221,10 @@ async function loadDataset() {
 }
 
 function init() {
+  const hashTab = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+  if (hashTab && ["lookup", "workflow", "history", "compare", "cycle", "psychrometric"].includes(hashTab)) {
+    state.activeTab = hashTab;
+  }
   wireTabs();
   wireLookupEvents();
   wireWorkflowEvents();
@@ -5228,6 +5235,7 @@ function init() {
   el.cycleDiagramSelect.value = state.cycle.diagram;
   el.toggleDome.checked = state.cycle.domeVisible;
   el.toggleIsobars.checked = state.cycle.isobarsVisible;
+  setActiveTab(state.activeTab);
 
   loadDataset();
 }

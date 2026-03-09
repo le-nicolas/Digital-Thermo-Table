@@ -389,12 +389,8 @@
             <p class="status" id="psychStatus">Hover to preview values. Click to lock a state. The background switches between ASHRAE page 1 and page 2.</p>
 
             <div class="canvas-wrap psych-canvas-wrap psych-chart-stage">
-              <iframe
-                id="psychChartPdf"
-                title="ASHRAE Psychrometric Chart Background"
-                src="assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#page=1&view=FitH"
-              ></iframe>
-              <canvas id="psychCanvas" width="1180" height="680"></canvas>
+              <img id="psychChartImage" alt="ASHRAE psychrometric chart background" src="assets/psych-page1-app.png" />
+              <canvas id="psychCanvas" width="985" height="744"></canvas>
             </div>
 
             <div class="result-grid" id="psychResultGrid"></div>
