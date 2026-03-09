@@ -469,6 +469,8 @@ const PSYCH_SYSTEMS = {
     volumeFromInternal: (value) => value * 16.018463,
     moistureFromInternal: (value) => value * 7000,
     imageSrc: "assets/psych-page1-app.png",
+    imageWidth: 1024,
+    imageHeight: 756,
     secondValueLabel: {
       rh: "Second property value (%)",
       w: "Humidity ratio W (lb/lb dry air)",
@@ -509,6 +511,8 @@ const PSYCH_SYSTEMS = {
     volumeFromInternal: (value) => value,
     moistureFromInternal: (value) => value * 1000,
     imageSrc: "assets/psych-page2-app.png",
+    imageWidth: 1024,
+    imageHeight: 770,
     secondValueLabel: {
       rh: "Second property value (%)",
       w: "Humidity ratio W (kg/kg dry air)",
@@ -801,6 +805,9 @@ function syncPsychUiToSystem() {
   }
   updatePsychSecondPropertyLabels();
   if (el.psychChartImage) {
+    el.psychChartImage.parentElement.style.aspectRatio = `${config.imageWidth} / ${config.imageHeight}`;
+    el.psychCanvas.width = config.imageWidth;
+    el.psychCanvas.height = config.imageHeight;
     el.psychChartImage.src = config.imageSrc;
   }
 }
@@ -5155,6 +5162,15 @@ function wirePsychEvents() {
 
   el.psychSecondType.addEventListener("change", () => {
     updatePsychSecondPropertyLabels();
+  });
+
+  el.psychChartImage.addEventListener("load", () => {
+    const width = el.psychChartImage.naturalWidth || currentPsychConfig().imageWidth;
+    const height = el.psychChartImage.naturalHeight || currentPsychConfig().imageHeight;
+    el.psychChartImage.parentElement.style.aspectRatio = `${width} / ${height}`;
+    el.psychCanvas.width = width;
+    el.psychCanvas.height = height;
+    drawPsychChart();
   });
 
   el.psychAddPointBtn.addEventListener("click", addCurrentPsychPointToProcess);

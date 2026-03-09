@@ -495,11 +495,7 @@ button:disabled {
 
 #psychCanvas {
   display: block;
-  width: 100%;
-  height: auto;
   border-radius: 8px;
-  aspect-ratio: 985 / 744;
-  position: relative;
   z-index: 2;
   background: transparent;
 }
@@ -563,14 +559,19 @@ button:disabled {
 }
 
 #psychChartImage {
-  position: absolute;
-  inset: 0;
+  display: block;
+  position: relative;
   z-index: 1;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center top;
+  height: auto;
   pointer-events: none;
+}
+
+#psychCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 @keyframes psych-system-flash {
