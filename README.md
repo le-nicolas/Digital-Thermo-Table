@@ -24,10 +24,11 @@ Digital Thermo Table is a browser-based thermodynamic and psychrometric property
 - Includes cycle plotting with configurable inputs, iterative unknown solving, and sanity-check warnings
 - Includes an interactive `Psychrometric Chart` tab:
   - Solve moist-air states from `dry-bulb + RH`, `W`, `wet-bulb`, `dew point`, or `enthalpy`
+  - Switch between `ASHRAE Page 1` Imperial units and `ASHRAE Page 2` SI units
+  - Uses the bundled ASHRAE reference PDF as the visual chart background instead of a generic custom redraw
   - Live hover preview on the chart so values update continuously as the mouse moves
   - Click the chart to lock a state and read all calculated properties
   - Add multiple states to a visible psychrometric process path
-  - Keeps the provided `ASHRAE-PSYCHROMETRIC-CHART.pdf` embedded on-screen as a flashing reference panel
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app
 

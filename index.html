@@ -344,15 +344,22 @@
         <div class="psych-layout">
           <section class="panel psych-controls">
             <h2>Digital Psychrometric Solver</h2>
-            <p class="status psych-note">Enter dry-bulb temperature plus any one companion property.</p>
+            <p class="status psych-note">Use the actual ASHRAE page as the chart background. Pick Imperial page 1 or SI page 2, then enter dry-bulb plus one companion property.</p>
 
             <form id="psychForm" class="query-form">
               <div class="query-field">
-                <label for="psychPressure">Pressure P (kPa)</label>
+                <label for="psychSystem">Chart standard</label>
+                <select id="psychSystem">
+                  <option value="IP">ASHRAE Page 1: Imperial (Btu/lb dry air)</option>
+                  <option value="SI">ASHRAE Page 2: SI (kJ/kg dry air)</option>
+                </select>
+              </div>
+              <div class="query-field">
+                <label for="psychPressure" id="psychPressureLabel">Pressure P (psia)</label>
                 <input id="psychPressure" type="number" step="any" value="101.325" />
               </div>
               <div class="query-field">
-                <label for="psychDryBulb">Dry-bulb Tdb (deg C)</label>
+                <label for="psychDryBulb" id="psychDryBulbLabel">Dry-bulb Tdb (deg F)</label>
                 <input id="psychDryBulb" type="number" step="any" placeholder="Example: 30" />
               </div>
               <div class="query-field">
@@ -366,7 +373,7 @@
                 </select>
               </div>
               <div class="query-field">
-                <label for="psychSecondValue">Second property value</label>
+                <label for="psychSecondValue" id="psychSecondValueLabel">Second property value</label>
                 <input id="psychSecondValue" type="number" step="any" placeholder="Value for selected property" />
               </div>
 
@@ -378,10 +385,15 @@
           </section>
 
           <section class="panel psych-main">
-            <h2>Interactive Psychrometric Chart</h2>
-            <p class="status" id="psychStatus">Click the chart or solve from dry-bulb + one second property.</p>
+            <h2>ASHRAE-Matched Interactive Chart</h2>
+            <p class="status" id="psychStatus">Hover to preview values. Click to lock a state. The background switches between ASHRAE page 1 and page 2.</p>
 
-            <div class="canvas-wrap psych-canvas-wrap">
+            <div class="canvas-wrap psych-canvas-wrap psych-chart-stage">
+              <iframe
+                id="psychChartPdf"
+                title="ASHRAE Psychrometric Chart Background"
+                src="assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#page=1&view=FitH"
+              ></iframe>
               <canvas id="psychCanvas" width="1180" height="680"></canvas>
             </div>
 
@@ -391,26 +403,6 @@
               <summary>Psychrometric steps</summary>
               <ol id="psychStepsList"></ol>
             </details>
-          </section>
-
-          <section class="panel psych-reference">
-            <div class="pdf-header">
-              <div>
-                <p class="eyebrow">Professor Shield</p>
-                <h2>ASHRAE Reference Chart</h2>
-              </div>
-              <p class="flash-badge">ASHRAE PDF on screen</p>
-            </div>
-            <p class="psych-reference-copy">
-              Embedded from your provided file so you can keep the official chart visible while using the digital tool.
-            </p>
-            <div class="pdf-flash-wrap">
-              <iframe
-                id="psychReferencePdf"
-                title="ASHRAE Psychrometric Chart"
-                src="assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#view=FitH"
-              ></iframe>
-            </div>
           </section>
         </div>
       </section>

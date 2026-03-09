@@ -184,6 +184,7 @@ const state = {
     isobarsVisible: false,
   },
   psych: {
+    chartSystem: "IP",
     pressure: 101.325,
     currentPoint: null,
     hoverPoint: null,
@@ -263,15 +264,20 @@ const el = {
   cyclePointsBody: document.getElementById("cyclePointsBody"),
 
   psychForm: document.getElementById("psychForm"),
+  psychSystem: document.getElementById("psychSystem"),
   psychPressure: document.getElementById("psychPressure"),
+  psychPressureLabel: document.getElementById("psychPressureLabel"),
   psychDryBulb: document.getElementById("psychDryBulb"),
+  psychDryBulbLabel: document.getElementById("psychDryBulbLabel"),
   psychSecondType: document.getElementById("psychSecondType"),
   psychSecondValue: document.getElementById("psychSecondValue"),
+  psychSecondValueLabel: document.getElementById("psychSecondValueLabel"),
   psychValidationMessage: document.getElementById("psychValidationMessage"),
   psychSolveBtn: document.getElementById("psychSolveBtn"),
   psychAddPointBtn: document.getElementById("psychAddPointBtn"),
   psychClearPointsBtn: document.getElementById("psychClearPointsBtn"),
   psychStatus: document.getElementById("psychStatus"),
+  psychChartPdf: document.getElementById("psychChartPdf"),
   psychCanvas: document.getElementById("psychCanvas"),
   psychResultGrid: document.getElementById("psychResultGrid"),
   psychStepsList: document.getElementById("psychStepsList"),
@@ -437,12 +443,92 @@ function sortedProperties(properties) {
   });
 }
 
-const PSYCH_CHART_RANGE = {
-  tMin: 0,
-  tMax: 50,
-  wMin: 0,
-  wMax: 0.03,
+const PSYCH_SYSTEMS = {
+  IP: {
+    code: "IP",
+    page: 1,
+    title: "ASHRAE Page 1",
+    defaultPressure: 14.696,
+    pressureUnit: "psia",
+    tempUnit: "deg F",
+    enthalpyUnit: "Btu/lb dry air",
+    volumeUnit: "ft^3/lb dry air",
+    moistureUnit: "gr/lb dry air",
+    humidityRatioUnit: "lb/lb dry air",
+    tMin: 30,
+    tMax: 120,
+    wMin: 0,
+    wMax: 0.03,
+    plot: { left: 0.08, right: 0.932, top: 0.07, bottom: 0.91 },
+    tempToInternal: (value) => ((value - 32) * 5) / 9,
+    tempFromInternal: (value) => (value * 9) / 5 + 32,
+    pressureToInternal: (value) => value * 6.894757293168361,
+    pressureFromInternal: (value) => value / 6.894757293168361,
+    enthalpyToInternal: (value) => value * 2.326,
+    enthalpyFromInternal: (value) => value / 2.326,
+    volumeFromInternal: (value) => value * 16.018463,
+    moistureFromInternal: (value) => value * 7000,
+    pdfSrc: "assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#page=1&view=FitH&toolbar=0&navpanes=0&scrollbar=0",
+    secondValueLabel: {
+      rh: "Second property value (%)",
+      w: "Humidity ratio W (lb/lb dry air)",
+      twb: "Wet-bulb Twb (deg F)",
+      tdp: "Dew-point Tdp (deg F)",
+      h: "Enthalpy h (Btu/lb dry air)",
+    },
+    secondOptionLabel: {
+      rh: "Relative humidity RH (%)",
+      w: "Humidity ratio W (lb/lb dry air)",
+      twb: "Wet-bulb Twb (deg F)",
+      tdp: "Dew-point Tdp (deg F)",
+      h: "Enthalpy h (Btu/lb dry air)",
+    },
+  },
+  SI: {
+    code: "SI",
+    page: 2,
+    title: "ASHRAE Page 2",
+    defaultPressure: 101.325,
+    pressureUnit: "kPa",
+    tempUnit: "deg C",
+    enthalpyUnit: "kJ/kg dry air",
+    volumeUnit: "m^3/kg dry air",
+    moistureUnit: "g/kg dry air",
+    humidityRatioUnit: "kg/kg dry air",
+    tMin: 0,
+    tMax: 50,
+    wMin: 0,
+    wMax: 0.03,
+    plot: { left: 0.08, right: 0.932, top: 0.07, bottom: 0.91 },
+    tempToInternal: (value) => value,
+    tempFromInternal: (value) => value,
+    pressureToInternal: (value) => value,
+    pressureFromInternal: (value) => value,
+    enthalpyToInternal: (value) => value,
+    enthalpyFromInternal: (value) => value,
+    volumeFromInternal: (value) => value,
+    moistureFromInternal: (value) => value * 1000,
+    pdfSrc: "assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#page=2&view=FitH&toolbar=0&navpanes=0&scrollbar=0",
+    secondValueLabel: {
+      rh: "Second property value (%)",
+      w: "Humidity ratio W (kg/kg dry air)",
+      twb: "Wet-bulb Twb (deg C)",
+      tdp: "Dew-point Tdp (deg C)",
+      h: "Enthalpy h (kJ/kg dry air)",
+    },
+    secondOptionLabel: {
+      rh: "Relative humidity RH (%)",
+      w: "Humidity ratio W (kg/kg dry air)",
+      twb: "Wet-bulb Twb (deg C)",
+      tdp: "Dew-point Tdp (deg C)",
+      h: "Enthalpy h (kJ/kg dry air)",
+    },
+  },
 };
+
+function currentPsychConfig() {
+  return PSYCH_SYSTEMS[state.psych.chartSystem] || PSYCH_SYSTEMS.SI;
+}
 
 function psychSaturationPressure(tC) {
   if (!Number.isFinite(tC)) {
@@ -569,7 +655,8 @@ function psychStateFromTdbAndW(tdb, w, pressure) {
   };
 }
 
-function solvePsychrometrics({ tdb, secondType, secondValue, pressure }) {
+function solvePsychrometrics({ tdb, secondType, secondValue, pressure, system }) {
+  const config = PSYCH_SYSTEMS[system] || currentPsychConfig();
   if (!Number.isFinite(pressure) || pressure <= 0) {
     throw new Error("Pressure must be greater than zero.");
   }
@@ -580,9 +667,12 @@ function solvePsychrometrics({ tdb, secondType, secondValue, pressure }) {
     throw new Error("A numeric second property value is required.");
   }
 
+  const pressureInternal = config.pressureToInternal(pressure);
+  const tdbInternal = config.tempToInternal(tdb);
   const steps = [
-    `Known dry-bulb temperature: Tdb = ${formatNumber(tdb)} deg C.`,
-    `Operating pressure: P = ${formatNumber(pressure)} kPa.`,
+    `Using ${config.title} (${config.code}).`,
+    `Known dry-bulb temperature: Tdb = ${formatNumber(tdb)} ${config.tempUnit}.`,
+    `Operating pressure: P = ${formatNumber(pressure)} ${config.pressureUnit}.`,
   ];
   let w = null;
 
@@ -591,43 +681,46 @@ function solvePsychrometrics({ tdb, secondType, secondValue, pressure }) {
     if (rh < 0 || rh > 1) {
       throw new Error("Relative humidity must be between 0 and 100%.");
     }
-    const pws = psychSaturationPressure(tdb);
+    const pws = psychSaturationPressure(tdbInternal);
     const pw = rh * pws;
-    w = psychHumidityRatioFromPartialPressure(pw, pressure);
+    w = psychHumidityRatioFromPartialPressure(pw, pressureInternal);
     steps.push(`Second property: RH = ${formatNumber(secondValue)}%.`);
-    steps.push(`Pw = RH * Pws(Tdb) = ${formatNumber(pw)} kPa.`);
-    steps.push(`W = 0.621945 * Pw / (P - Pw) = ${formatNumber(w)} kg/kg dry air.`);
+    steps.push(`Converted vapor pressure gives W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else if (secondType === "w") {
     w = secondValue;
-    steps.push(`Second property: W = ${formatNumber(w)} kg/kg dry air.`);
+    steps.push(`Second property: W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else if (secondType === "tdp") {
-    const pw = psychSaturationPressure(secondValue);
-    w = psychHumidityRatioFromPartialPressure(pw, pressure);
-    steps.push(`Second property: Tdp = ${formatNumber(secondValue)} deg C.`);
-    steps.push(`At dew point, Pw = Pws(Tdp) = ${formatNumber(pw)} kPa.`);
-    steps.push(`W = 0.621945 * Pw / (P - Pw) = ${formatNumber(w)} kg/kg dry air.`);
+    const pw = psychSaturationPressure(config.tempToInternal(secondValue));
+    w = psychHumidityRatioFromPartialPressure(pw, pressureInternal);
+    steps.push(`Second property: Tdp = ${formatNumber(secondValue)} ${config.tempUnit}.`);
+    steps.push(`At dew point, Pw = Pws(Tdp), so W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else if (secondType === "h") {
-    w = (secondValue - 1.006 * tdb) / (2501 + 1.86 * tdb);
-    steps.push(`Second property: h = ${formatNumber(secondValue)} kJ/kg dry air.`);
-    steps.push(`Rearrange h = 1.006*Tdb + W*(2501 + 1.86*Tdb).`);
-    steps.push(`W = ${formatNumber(w)} kg/kg dry air.`);
+    const hInternal = config.enthalpyToInternal(secondValue);
+    w = (hInternal - 1.006 * tdbInternal) / (2501 + 1.86 * tdbInternal);
+    steps.push(`Second property: h = ${formatNumber(secondValue)} ${config.enthalpyUnit}.`);
+    steps.push(`Back-solved humidity ratio W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else if (secondType === "twb") {
-    if (secondValue > tdb + 1e-9) {
+    const twbInternal = config.tempToInternal(secondValue);
+    if (twbInternal > tdbInternal + 1e-9) {
       throw new Error("Wet-bulb temperature cannot exceed dry-bulb temperature.");
     }
-    const wsTwb = psychSaturationHumidityRatio(secondValue, pressure);
-    const hSatTwb = psychEnthalpy(secondValue, wsTwb);
-    w = (hSatTwb - 1.006 * tdb) / (2501 + 1.86 * tdb);
-    steps.push(`Second property: Twb = ${formatNumber(secondValue)} deg C.`);
-    steps.push(`Assume h approximately equals saturated-air enthalpy at Twb.`);
-    steps.push(`h_sat(Twb) = ${formatNumber(hSatTwb)} kJ/kg dry air, so W = ${formatNumber(w)} kg/kg dry air.`);
+    const wsTwb = psychSaturationHumidityRatio(twbInternal, pressureInternal);
+    const hSatTwb = psychEnthalpy(twbInternal, wsTwb);
+    w = (hSatTwb - 1.006 * tdbInternal) / (2501 + 1.86 * tdbInternal);
+    steps.push(`Second property: Twb = ${formatNumber(secondValue)} ${config.tempUnit}.`);
+    steps.push(`Using the wet-bulb enthalpy relation, W = ${formatNumber(w)} ${config.humidityRatioUnit}.`);
   } else {
     throw new Error("Unsupported second psychrometric property.");
   }
 
-  const solved = psychStateFromTdbAndW(tdb, w, pressure);
-  steps.push(`Solved RH = ${formatNumber((solved.rh || 0) * 100)}%, Twb = ${formatNumber(solved.twb)} deg C, Tdp = ${formatNumber(solved.tdp)} deg C.`);
-  steps.push(`Solved h = ${formatNumber(solved.h)} kJ/kg dry air, v = ${formatNumber(solved.v)} m^3/kg dry air.`);
+  const solved = psychStateFromTdbAndW(tdbInternal, w, pressureInternal);
+  steps.push(`Solved RH = ${formatNumber((solved.rh || 0) * 100)}%.`);
+  steps.push(
+    `Solved Twb = ${formatNumber(config.tempFromInternal(solved.twb))} ${config.tempUnit}, Tdp = ${formatNumber(config.tempFromInternal(solved.tdp))} ${config.tempUnit}.`,
+  );
+  steps.push(
+    `Solved h = ${formatNumber(config.enthalpyFromInternal(solved.h))} ${config.enthalpyUnit}, v = ${formatNumber(config.volumeFromInternal(solved.v))} ${config.volumeUnit}.`,
+  );
   return { point: solved, steps };
 }
 
@@ -635,17 +728,18 @@ function psychResultItems(point) {
   if (!point) {
     return [];
   }
+  const config = currentPsychConfig();
   return [
-    { label: "Tdb", value: point.tdb, desc: "Dry-bulb temperature", unit: "deg C" },
-    { label: "Twb", value: point.twb, desc: "Wet-bulb temperature", unit: "deg C" },
-    { label: "Tdp", value: point.tdp, desc: "Dew-point temperature", unit: "deg C" },
+    { label: "Tdb", value: config.tempFromInternal(point.tdb), desc: "Dry-bulb temperature", unit: config.tempUnit },
+    { label: "Twb", value: config.tempFromInternal(point.twb), desc: "Wet-bulb temperature", unit: config.tempUnit },
+    { label: "Tdp", value: config.tempFromInternal(point.tdp), desc: "Dew-point temperature", unit: config.tempUnit },
     { label: "RH", value: Number.isFinite(point.rh) ? point.rh * 100 : null, desc: "Relative humidity", unit: "%" },
-    { label: "W", value: point.w, desc: "Humidity ratio", unit: "kg/kg dry air" },
-    { label: "g/kg", value: point.grainsPerKg, desc: "Moisture per kg dry air", unit: "g/kg" },
-    { label: "h", value: point.h, desc: "Specific enthalpy", unit: "kJ/kg dry air" },
-    { label: "v", value: point.v, desc: "Specific volume", unit: "m^3/kg dry air" },
-    { label: "Pw", value: point.pw, desc: "Water-vapor partial pressure", unit: "kPa" },
-    { label: "Pws", value: point.pws, desc: "Saturation pressure at Tdb", unit: "kPa" },
+    { label: "W", value: point.w, desc: "Humidity ratio", unit: config.humidityRatioUnit },
+    { label: config.code === "IP" ? "gr/lb" : "g/kg", value: config.moistureFromInternal(point.w), desc: "Moisture content", unit: config.moistureUnit },
+    { label: "h", value: config.enthalpyFromInternal(point.h), desc: "Specific enthalpy", unit: config.enthalpyUnit },
+    { label: "v", value: config.volumeFromInternal(point.v), desc: "Specific volume", unit: config.volumeUnit },
+    { label: "Pw", value: config.pressureFromInternal(point.pw), desc: "Water-vapor partial pressure", unit: config.pressureUnit },
+    { label: "Pws", value: config.pressureFromInternal(point.pws), desc: "Saturation pressure at Tdb", unit: config.pressureUnit },
   ];
 }
 
@@ -685,19 +779,48 @@ function renderPsychResults(point, steps = []) {
   renderPsychSteps(steps);
 }
 
+function updatePsychSecondPropertyLabels() {
+  const config = currentPsychConfig();
+  for (const option of el.psychSecondType.options) {
+    const label = config.secondOptionLabel[option.value];
+    if (label) {
+      option.textContent = label;
+    }
+  }
+  el.psychSecondValueLabel.textContent = config.secondValueLabel[el.psychSecondType.value] || "Second property value";
+}
+
+function syncPsychUiToSystem() {
+  const config = currentPsychConfig();
+  el.psychPressureLabel.textContent = `Pressure P (${config.pressureUnit})`;
+  el.psychDryBulbLabel.textContent = `Dry-bulb Tdb (${config.tempUnit})`;
+  el.psychPressure.value = String(config.defaultPressure);
+  el.psychDryBulb.placeholder = config.code === "IP" ? "Example: 86" : "Example: 30";
+  updatePsychSecondPropertyLabels();
+  if (el.psychChartPdf) {
+    el.psychChartPdf.src = config.pdfSrc;
+  }
+}
+
 function psychChartGeometry() {
+  const config = currentPsychConfig();
   const canvas = el.psychCanvas;
   const width = canvas.width;
   const height = canvas.height;
-  const plot = { left: 72, right: width - 22, top: 22, bottom: height - 58 };
+  const plot = {
+    left: width * config.plot.left,
+    right: width * config.plot.right,
+    top: height * config.plot.top,
+    bottom: height * config.plot.bottom,
+  };
   const xScale = (temp) =>
-    plot.left + ((temp - PSYCH_CHART_RANGE.tMin) / (PSYCH_CHART_RANGE.tMax - PSYCH_CHART_RANGE.tMin)) * (plot.right - plot.left);
+    plot.left + ((temp - config.tMin) / (config.tMax - config.tMin)) * (plot.right - plot.left);
   const yScale = (w) =>
-    plot.bottom - ((w - PSYCH_CHART_RANGE.wMin) / (PSYCH_CHART_RANGE.wMax - PSYCH_CHART_RANGE.wMin)) * (plot.bottom - plot.top);
+    plot.bottom - ((w - config.wMin) / (config.wMax - config.wMin)) * (plot.bottom - plot.top);
   const tempFromX = (x) =>
-    PSYCH_CHART_RANGE.tMin + ((x - plot.left) / (plot.right - plot.left)) * (PSYCH_CHART_RANGE.tMax - PSYCH_CHART_RANGE.tMin);
+    config.tMin + ((x - plot.left) / (plot.right - plot.left)) * (config.tMax - config.tMin);
   const wFromY = (y) =>
-    PSYCH_CHART_RANGE.wMin + ((plot.bottom - y) / (plot.bottom - plot.top)) * (PSYCH_CHART_RANGE.wMax - PSYCH_CHART_RANGE.wMin);
+    config.wMin + ((plot.bottom - y) / (plot.bottom - plot.top)) * (config.wMax - config.wMin);
   return { canvas, width, height, plot, xScale, yScale, tempFromX, wFromY };
 }
 
@@ -709,107 +832,10 @@ function drawPsychChart() {
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, width, height);
 
-  ctx.fillStyle = "#fffdf8";
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.strokeStyle = "#d7dde5";
-  ctx.lineWidth = 1;
-  for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 5) {
-    const x = xScale(t);
-    ctx.beginPath();
-    ctx.moveTo(x, plot.top);
-    ctx.lineTo(x, plot.bottom);
-    ctx.stroke();
-    ctx.fillStyle = "#667085";
-    ctx.font = "11px JetBrains Mono";
-    ctx.textAlign = "center";
-    ctx.fillText(String(t), x, height - 28);
-  }
-  for (let w = PSYCH_CHART_RANGE.wMin; w <= PSYCH_CHART_RANGE.wMax + 1e-9; w += 0.002) {
-    const y = yScale(w);
-    ctx.beginPath();
-    ctx.moveTo(plot.left, y);
-    ctx.lineTo(plot.right, y);
-    ctx.stroke();
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#667085";
-    ctx.fillText((w * 1000).toFixed(0), plot.left - 8, y + 4);
-  }
-
   ctx.save();
   ctx.beginPath();
   ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
   ctx.clip();
-
-  const pressure = state.psych.pressure;
-
-  for (let rhPct = 10; rhPct < 100; rhPct += 10) {
-    ctx.beginPath();
-    ctx.strokeStyle = rhPct === 50 ? "#1d4ed8" : "rgba(16, 163, 127, 0.55)";
-    ctx.lineWidth = rhPct === 50 ? 1.8 : 1;
-    let started = false;
-    for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 0.25) {
-      const pws = psychSaturationPressure(t);
-      const w = psychHumidityRatioFromPartialPressure((rhPct / 100) * pws, pressure);
-      if (!Number.isFinite(w) || w < 0 || w > PSYCH_CHART_RANGE.wMax) {
-        continue;
-      }
-      const x = xScale(t);
-      const y = yScale(w);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    ctx.stroke();
-  }
-
-  for (let h = 10; h <= 120; h += 10) {
-    ctx.beginPath();
-    ctx.strokeStyle = "rgba(148, 163, 184, 0.55)";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    let started = false;
-    for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 0.25) {
-      const w = (h - 1.006 * t) / (2501 + 1.86 * t);
-      const ws = psychSaturationHumidityRatio(t, pressure);
-      if (!Number.isFinite(w) || w < 0 || w > Math.min(ws, PSYCH_CHART_RANGE.wMax)) {
-        continue;
-      }
-      const x = xScale(t);
-      const y = yScale(w);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  ctx.beginPath();
-  ctx.strokeStyle = "#ea580c";
-  ctx.lineWidth = 3;
-  let started = false;
-  for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 0.25) {
-    const w = psychSaturationHumidityRatio(t, pressure);
-    if (!Number.isFinite(w) || w > PSYCH_CHART_RANGE.wMax) {
-      continue;
-    }
-    const x = xScale(t);
-    const y = yScale(w);
-    if (!started) {
-      ctx.moveTo(x, y);
-      started = true;
-    } else {
-      ctx.lineTo(x, y);
-    }
-  }
-  ctx.stroke();
 
   if (state.psych.processPoints.length > 1) {
     ctx.beginPath();
@@ -820,7 +846,8 @@ function drawPsychChart() {
       if (!Number.isFinite(point.tdb) || !Number.isFinite(point.w)) {
         continue;
       }
-      const x = xScale(point.tdb);
+      const displayT = currentPsychConfig().tempFromInternal(point.tdb);
+      const x = xScale(displayT);
       const y = yScale(point.w);
       if (!startedProcess) {
         ctx.moveTo(x, y);
@@ -833,7 +860,8 @@ function drawPsychChart() {
   }
 
   state.psych.processPoints.forEach((point, index) => {
-    const x = xScale(point.tdb);
+    const displayT = currentPsychConfig().tempFromInternal(point.tdb);
+    const x = xScale(displayT);
     const y = yScale(point.w);
     ctx.fillStyle = "#7c3aed";
     ctx.beginPath();
@@ -847,7 +875,7 @@ function drawPsychChart() {
 
   if (state.psych.currentPoint) {
     const point = state.psych.currentPoint;
-    const x = xScale(point.tdb);
+    const x = xScale(currentPsychConfig().tempFromInternal(point.tdb));
     const y = yScale(point.w);
     ctx.strokeStyle = "rgba(220, 38, 38, 0.35)";
     ctx.lineWidth = 1;
@@ -866,7 +894,7 @@ function drawPsychChart() {
 
   if (state.psych.hoverPoint) {
     const point = state.psych.hoverPoint;
-    const x = xScale(point.tdb);
+    const x = xScale(currentPsychConfig().tempFromInternal(point.tdb));
     const y = yScale(point.w);
     ctx.strokeStyle = "rgba(29, 78, 216, 0.28)";
     ctx.lineWidth = 1;
@@ -884,28 +912,6 @@ function drawPsychChart() {
   }
 
   ctx.restore();
-
-  ctx.strokeStyle = "#344054";
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
-
-  ctx.fillStyle = "#101828";
-  ctx.font = "700 13px Space Grotesk";
-  ctx.textAlign = "center";
-  ctx.fillText("Dry-bulb Temperature, deg C", (plot.left + plot.right) / 2, height - 8);
-  ctx.save();
-  ctx.translate(20, (plot.top + plot.bottom) / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText("Humidity Ratio, g/kg dry air", 0, 0);
-  ctx.restore();
-
-  ctx.fillStyle = "#ea580c";
-  ctx.font = "12px JetBrains Mono";
-  ctx.fillText("Saturation curve", plot.left + 96, plot.top + 18);
-  ctx.fillStyle = "#1d4ed8";
-  ctx.fillText("RH curves", plot.left + 270, plot.top + 18);
-  ctx.fillStyle = "#7c3aed";
-  ctx.fillText("Process path", plot.left + 388, plot.top + 18);
 }
 
 function psychCanvasPointFromEvent(event) {
@@ -924,6 +930,7 @@ function handlePsychCanvasClick(event) {
   if (point.x < plot.left || point.x > plot.right || point.y < plot.top || point.y > plot.bottom) {
     return;
   }
+  const config = currentPsychConfig();
   const tdb = tempFromX(point.x);
   const w = wFromY(point.y);
   try {
@@ -931,15 +938,17 @@ function handlePsychCanvasClick(event) {
       tdb,
       secondType: "w",
       secondValue: w,
-      pressure: state.psych.pressure,
+      pressure: Number(el.psychPressure.value),
+      system: config.code,
     });
     state.psych.currentPoint = solved.point;
-    el.psychDryBulb.value = formatNumber(solved.point.tdb);
+    el.psychDryBulb.value = formatNumber(config.tempFromInternal(solved.point.tdb));
     el.psychSecondType.value = "w";
+    updatePsychSecondPropertyLabels();
     el.psychSecondValue.value = formatNumber(solved.point.w);
-    renderPsychResults(solved.point, ["Picked directly from the chart canvas."].concat(solved.steps));
+    renderPsychResults(solved.point, ["Picked directly from the ASHRAE chart overlay."].concat(solved.steps));
     setPsychValidationMessage("Chart point accepted.");
-    setPsychStatus("Psychrometric state read directly from the chart.", "ok");
+    setPsychStatus(`Locked ${config.title} state from chart click.`, "ok");
     drawPsychChart();
   } catch (error) {
     setPsychValidationMessage(error.message, "warn");
@@ -954,6 +963,7 @@ function handlePsychCanvasMove(event) {
     return;
   }
 
+  const config = currentPsychConfig();
   const tdb = tempFromX(point.x);
   const w = wFromY(point.y);
   try {
@@ -961,13 +971,14 @@ function handlePsychCanvasMove(event) {
       tdb,
       secondType: "w",
       secondValue: w,
-      pressure: state.psych.pressure,
+      pressure: Number(el.psychPressure.value),
+      system: config.code,
     });
     state.psych.hoverPoint = solved.point;
-    renderPsychResults(solved.point, ["Live hover preview from chart position."]);
-    setPsychValidationMessage("Hovering chart preview.");
+    renderPsychResults(solved.point, ["Live hover preview from the ASHRAE chart page."]);
+    setPsychValidationMessage(`Hovering ${config.title}.`);
     setPsychStatus(
-      `Hover preview: Tdb=${formatNumber(solved.point.tdb)} deg C, RH=${formatNumber((solved.point.rh || 0) * 100)}%, W=${formatNumber(solved.point.grainsPerKg)} g/kg.`,
+      `Hover preview: Tdb=${formatNumber(config.tempFromInternal(solved.point.tdb))} ${config.tempUnit}, RH=${formatNumber((solved.point.rh || 0) * 100)}%, W=${formatNumber(config.moistureFromInternal(solved.point.w))} ${config.moistureUnit}.`,
       "ok",
     );
     drawPsychChart();
@@ -5078,13 +5089,14 @@ function solvePsychrometricsFromForm() {
   const tdb = Number(el.psychDryBulb.value);
   const secondType = el.psychSecondType.value;
   const secondValue = Number(el.psychSecondValue.value);
+  const system = state.psych.chartSystem;
 
-  const solved = solvePsychrometrics({ tdb, secondType, secondValue, pressure });
+  const solved = solvePsychrometrics({ tdb, secondType, secondValue, pressure, system });
   state.psych.pressure = pressure;
   state.psych.currentPoint = solved.point;
   renderPsychResults(solved.point, solved.steps);
   setPsychValidationMessage("Psychrometric state solved.");
-  setPsychStatus(`Solved from Tdb + ${secondType}.`, "ok");
+  setPsychStatus(`Solved from ${currentPsychConfig().title}: Tdb + ${secondType}.`, "ok");
   drawPsychChart();
 }
 
@@ -5092,6 +5104,9 @@ function wirePsychEvents() {
   if (!el.psychForm) {
     return;
   }
+
+  state.psych.chartSystem = el.psychSystem.value;
+  syncPsychUiToSystem();
 
   el.psychForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -5106,12 +5121,29 @@ function wirePsychEvents() {
     }
   });
 
+  el.psychSystem.addEventListener("change", () => {
+    state.psych.chartSystem = el.psychSystem.value;
+    state.psych.hoverPoint = null;
+    syncPsychUiToSystem();
+    if (state.psych.currentPoint) {
+      renderPsychResults(state.psych.currentPoint, [`Showing current state on ${currentPsychConfig().title}.`]);
+    } else {
+      clearPsychResults();
+    }
+    setPsychStatus(`${currentPsychConfig().title} selected.`, "ok");
+    drawPsychChart();
+  });
+
   el.psychPressure.addEventListener("input", () => {
     const pressure = Number(el.psychPressure.value);
     if (Number.isFinite(pressure) && pressure > 0) {
       state.psych.pressure = pressure;
       drawPsychChart();
     }
+  });
+
+  el.psychSecondType.addEventListener("change", () => {
+    updatePsychSecondPropertyLabels();
   });
 
   el.psychAddPointBtn.addEventListener("click", addCurrentPsychPointToProcess);
@@ -5188,8 +5220,8 @@ function init() {
   el.cycleDiagramSelect.value = state.cycle.diagram;
   el.toggleDome.checked = state.cycle.domeVisible;
   el.toggleIsobars.checked = state.cycle.isobarsVisible;
-  if (el.psychPressure) {
-    el.psychPressure.value = String(state.psych.pressure);
+  if (el.psychSystem) {
+    el.psychSystem.value = state.psych.chartSystem;
   }
 
   loadDataset();
