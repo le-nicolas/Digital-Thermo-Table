@@ -468,9 +468,9 @@ const PSYCH_SYSTEMS = {
     enthalpyFromInternal: (value) => value / 2.326,
     volumeFromInternal: (value) => value * 16.018463,
     moistureFromInternal: (value) => value * 7000,
-    imageSrc: "assets/psych-page1-app.png",
-    imageWidth: 1024,
-    imageHeight: 756,
+    imageSrc: "assets/Imperial.png",
+    imageWidth: 993,
+    imageHeight: 755,
     secondValueLabel: {
       rh: "Second property value (%)",
       w: "Humidity ratio W (lb/lb dry air)",
@@ -510,8 +510,8 @@ const PSYCH_SYSTEMS = {
     enthalpyFromInternal: (value) => value,
     volumeFromInternal: (value) => value,
     moistureFromInternal: (value) => value * 1000,
-    imageSrc: "assets/psych-page2-app.png",
-    imageWidth: 1024,
+    imageSrc: "assets/SI.png",
+    imageWidth: 998,
     imageHeight: 770,
     secondValueLabel: {
       rh: "Second property value (%)",
