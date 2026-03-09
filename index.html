@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ThermoLookup</title>
+    <title>Digital Thermo Table</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,9 +19,9 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Mechanical Engineering Utility</p>
-        <h1>ThermoLookup</h1>
+        <h1>Digital Thermo Table</h1>
         <p class="subtitle">
-          Workflow-driven thermodynamics solving, property lookup history, compare mode, and cycle plotting from your bundled dataset.
+          Workflow-driven thermodynamics solving, property lookup history, cycle plotting, and an interactive psychrometric chart with the ASHRAE reference on screen.
         </p>
       </div>
       <div class="dataset-pill" id="datasetMeta">Loading dataset...</div>
@@ -33,6 +33,7 @@
       <button class="tab-btn" data-tab="history">Query History</button>
       <button class="tab-btn" data-tab="compare">Compare</button>
       <button class="tab-btn" data-tab="cycle">Cycle Plotter</button>
+      <button class="tab-btn" data-tab="psychrometric">Psychrometric Chart</button>
     </nav>
 
     <main class="tab-host">
@@ -334,6 +335,81 @@
                   </table>
                 </div>
               </section>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-psychrometric">
+        <div class="psych-layout">
+          <section class="panel psych-controls">
+            <h2>Digital Psychrometric Solver</h2>
+            <p class="status psych-note">Enter dry-bulb temperature plus any one companion property.</p>
+
+            <form id="psychForm" class="query-form">
+              <div class="query-field">
+                <label for="psychPressure">Pressure P (kPa)</label>
+                <input id="psychPressure" type="number" step="any" value="101.325" />
+              </div>
+              <div class="query-field">
+                <label for="psychDryBulb">Dry-bulb Tdb (deg C)</label>
+                <input id="psychDryBulb" type="number" step="any" placeholder="Example: 30" />
+              </div>
+              <div class="query-field">
+                <label for="psychSecondType">Second property</label>
+                <select id="psychSecondType">
+                  <option value="rh">Relative humidity RH (%)</option>
+                  <option value="w">Humidity ratio W (kg/kg dry air)</option>
+                  <option value="twb">Wet-bulb Twb (deg C)</option>
+                  <option value="tdp">Dew-point Tdp (deg C)</option>
+                  <option value="h">Enthalpy h (kJ/kg dry air)</option>
+                </select>
+              </div>
+              <div class="query-field">
+                <label for="psychSecondValue">Second property value</label>
+                <input id="psychSecondValue" type="number" step="any" placeholder="Value for selected property" />
+              </div>
+
+              <p class="validation-msg" id="psychValidationMessage"></p>
+              <button type="submit" id="psychSolveBtn">Solve Psychrometrics</button>
+              <button type="button" class="btn-secondary" id="psychAddPointBtn">Add Point To Process</button>
+              <button type="button" class="btn-secondary" id="psychClearPointsBtn">Clear Process</button>
+            </form>
+          </section>
+
+          <section class="panel psych-main">
+            <h2>Interactive Psychrometric Chart</h2>
+            <p class="status" id="psychStatus">Click the chart or solve from dry-bulb + one second property.</p>
+
+            <div class="canvas-wrap psych-canvas-wrap">
+              <canvas id="psychCanvas" width="1180" height="680"></canvas>
+            </div>
+
+            <div class="result-grid" id="psychResultGrid"></div>
+
+            <details class="steps" open>
+              <summary>Psychrometric steps</summary>
+              <ol id="psychStepsList"></ol>
+            </details>
+          </section>
+
+          <section class="panel psych-reference">
+            <div class="pdf-header">
+              <div>
+                <p class="eyebrow">Professor Shield</p>
+                <h2>ASHRAE Reference Chart</h2>
+              </div>
+              <p class="flash-badge">ASHRAE PDF on screen</p>
+            </div>
+            <p class="psych-reference-copy">
+              Embedded from your provided file so you can keep the official chart visible while using the digital tool.
+            </p>
+            <div class="pdf-flash-wrap">
+              <iframe
+                id="psychReferencePdf"
+                title="ASHRAE Psychrometric Chart"
+                src="assets/ASHRAE-PSYCHROMETRIC-CHART.pdf#view=FitH"
+              ></iframe>
             </div>
           </section>
         </div>

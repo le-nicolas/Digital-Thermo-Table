@@ -183,6 +183,12 @@ const state = {
     domeVisible: true,
     isobarsVisible: false,
   },
+  psych: {
+    pressure: 101.325,
+    currentPoint: null,
+    hoverPoint: null,
+    processPoints: [],
+  },
 };
 
 const el = {
@@ -255,6 +261,20 @@ const el = {
   cycleMetrics: document.getElementById("cycleMetrics"),
   cycleWarnings: document.getElementById("cycleWarnings"),
   cyclePointsBody: document.getElementById("cyclePointsBody"),
+
+  psychForm: document.getElementById("psychForm"),
+  psychPressure: document.getElementById("psychPressure"),
+  psychDryBulb: document.getElementById("psychDryBulb"),
+  psychSecondType: document.getElementById("psychSecondType"),
+  psychSecondValue: document.getElementById("psychSecondValue"),
+  psychValidationMessage: document.getElementById("psychValidationMessage"),
+  psychSolveBtn: document.getElementById("psychSolveBtn"),
+  psychAddPointBtn: document.getElementById("psychAddPointBtn"),
+  psychClearPointsBtn: document.getElementById("psychClearPointsBtn"),
+  psychStatus: document.getElementById("psychStatus"),
+  psychCanvas: document.getElementById("psychCanvas"),
+  psychResultGrid: document.getElementById("psychResultGrid"),
+  psychStepsList: document.getElementById("psychStepsList"),
 };
 
 function formatNumber(value) {
@@ -362,6 +382,28 @@ function setWorkflowStatus(message, kind = "") {
   }
 }
 
+function setPsychStatus(message, kind = "") {
+  if (!el.psychStatus) {
+    return;
+  }
+  el.psychStatus.textContent = message;
+  el.psychStatus.className = "status";
+  if (kind) {
+    el.psychStatus.classList.add(kind);
+  }
+}
+
+function setPsychValidationMessage(message, kind = "") {
+  if (!el.psychValidationMessage) {
+    return;
+  }
+  el.psychValidationMessage.textContent = message;
+  el.psychValidationMessage.className = "validation-msg";
+  if (kind) {
+    el.psychValidationMessage.classList.add(kind);
+  }
+}
+
 function setWorkflowValidationMessage(message, kind = "") {
   el.workflowValidationMessage.textContent = message;
   el.workflowValidationMessage.className = "validation-msg";
@@ -393,6 +435,576 @@ function sortedProperties(properties) {
     }
     return a.localeCompare(b);
   });
+}
+
+const PSYCH_CHART_RANGE = {
+  tMin: 0,
+  tMax: 50,
+  wMin: 0,
+  wMax: 0.03,
+};
+
+function psychSaturationPressure(tC) {
+  if (!Number.isFinite(tC)) {
+    return null;
+  }
+  if (tC >= 0) {
+    return 0.61121 * Math.exp((18.678 - tC / 234.5) * (tC / (257.14 + tC)));
+  }
+  return 0.61115 * Math.exp((23.036 - tC / 333.7) * (tC / (279.82 + tC)));
+}
+
+function psychHumidityRatioFromPartialPressure(pw, pressure) {
+  if (!Number.isFinite(pw) || !Number.isFinite(pressure) || pw < 0 || pw >= pressure) {
+    return null;
+  }
+  if (pw === 0) {
+    return 0;
+  }
+  return 0.621945 * pw / (pressure - pw);
+}
+
+function psychPartialPressureFromHumidityRatio(w, pressure) {
+  if (!Number.isFinite(w) || !Number.isFinite(pressure) || w < 0) {
+    return null;
+  }
+  return pressure * w / (0.621945 + w);
+}
+
+function psychSaturationHumidityRatio(tC, pressure) {
+  const pws = psychSaturationPressure(tC);
+  return psychHumidityRatioFromPartialPressure(pws, pressure);
+}
+
+function psychEnthalpy(tC, w) {
+  if (!Number.isFinite(tC) || !Number.isFinite(w)) {
+    return null;
+  }
+  return 1.006 * tC + w * (2501 + 1.86 * tC);
+}
+
+function psychSpecificVolume(tC, w, pressure) {
+  if (!Number.isFinite(tC) || !Number.isFinite(w) || !Number.isFinite(pressure) || pressure <= 0) {
+    return null;
+  }
+  return 0.287042 * (tC + 273.15) * (1 + 1.607858 * w) / pressure;
+}
+
+function psychDewPointFromPartialPressure(pw) {
+  if (!Number.isFinite(pw) || pw <= 0) {
+    return null;
+  }
+  let low = -60;
+  let high = 100;
+  for (let i = 0; i < 80; i += 1) {
+    const mid = (low + high) / 2;
+    const guess = psychSaturationPressure(mid);
+    if (!Number.isFinite(guess)) {
+      break;
+    }
+    if (guess > pw) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+  return (low + high) / 2;
+}
+
+function psychStateFromTdbAndW(tdb, w, pressure) {
+  const pws = psychSaturationPressure(tdb);
+  const ws = psychSaturationHumidityRatio(tdb, pressure);
+  if (!Number.isFinite(pws) || !Number.isFinite(ws)) {
+    throw new Error("Could not compute saturation properties at the specified dry-bulb temperature.");
+  }
+  if (w < 0) {
+    throw new Error("Humidity ratio must be non-negative.");
+  }
+  if (w > ws + 1e-6) {
+    throw new Error("Selected point sits above the saturation curve for this dry-bulb temperature.");
+  }
+
+  const pw = psychPartialPressureFromHumidityRatio(w, pressure);
+  const rh = safeRatio(pw, pws);
+  const h = psychEnthalpy(tdb, w);
+  const v = psychSpecificVolume(tdb, w, pressure);
+  const tdp = psychDewPointFromPartialPressure(pw);
+  const hSatAtTwb = (twb) => {
+    const wsTwb = psychSaturationHumidityRatio(twb, pressure);
+    return psychEnthalpy(twb, wsTwb);
+  };
+
+  let low = -30;
+  let high = tdb;
+  let twb = tdb;
+  if (Number.isFinite(h)) {
+    for (let i = 0; i < 80; i += 1) {
+      const mid = (low + high) / 2;
+      const hMid = hSatAtTwb(mid);
+      if (!Number.isFinite(hMid)) {
+        break;
+      }
+      if (hMid > h) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+    twb = (low + high) / 2;
+  }
+
+  return {
+    pressure,
+    tdb,
+    twb,
+    tdp,
+    rh,
+    w,
+    grainsPerKg: w * 1000,
+    h,
+    v,
+    pw,
+    pws,
+    ws,
+  };
+}
+
+function solvePsychrometrics({ tdb, secondType, secondValue, pressure }) {
+  if (!Number.isFinite(pressure) || pressure <= 0) {
+    throw new Error("Pressure must be greater than zero.");
+  }
+  if (!Number.isFinite(tdb)) {
+    throw new Error("Dry-bulb temperature is required.");
+  }
+  if (!Number.isFinite(secondValue)) {
+    throw new Error("A numeric second property value is required.");
+  }
+
+  const steps = [
+    `Known dry-bulb temperature: Tdb = ${formatNumber(tdb)} deg C.`,
+    `Operating pressure: P = ${formatNumber(pressure)} kPa.`,
+  ];
+  let w = null;
+
+  if (secondType === "rh") {
+    const rh = secondValue / 100;
+    if (rh < 0 || rh > 1) {
+      throw new Error("Relative humidity must be between 0 and 100%.");
+    }
+    const pws = psychSaturationPressure(tdb);
+    const pw = rh * pws;
+    w = psychHumidityRatioFromPartialPressure(pw, pressure);
+    steps.push(`Second property: RH = ${formatNumber(secondValue)}%.`);
+    steps.push(`Pw = RH * Pws(Tdb) = ${formatNumber(pw)} kPa.`);
+    steps.push(`W = 0.621945 * Pw / (P - Pw) = ${formatNumber(w)} kg/kg dry air.`);
+  } else if (secondType === "w") {
+    w = secondValue;
+    steps.push(`Second property: W = ${formatNumber(w)} kg/kg dry air.`);
+  } else if (secondType === "tdp") {
+    const pw = psychSaturationPressure(secondValue);
+    w = psychHumidityRatioFromPartialPressure(pw, pressure);
+    steps.push(`Second property: Tdp = ${formatNumber(secondValue)} deg C.`);
+    steps.push(`At dew point, Pw = Pws(Tdp) = ${formatNumber(pw)} kPa.`);
+    steps.push(`W = 0.621945 * Pw / (P - Pw) = ${formatNumber(w)} kg/kg dry air.`);
+  } else if (secondType === "h") {
+    w = (secondValue - 1.006 * tdb) / (2501 + 1.86 * tdb);
+    steps.push(`Second property: h = ${formatNumber(secondValue)} kJ/kg dry air.`);
+    steps.push(`Rearrange h = 1.006*Tdb + W*(2501 + 1.86*Tdb).`);
+    steps.push(`W = ${formatNumber(w)} kg/kg dry air.`);
+  } else if (secondType === "twb") {
+    if (secondValue > tdb + 1e-9) {
+      throw new Error("Wet-bulb temperature cannot exceed dry-bulb temperature.");
+    }
+    const wsTwb = psychSaturationHumidityRatio(secondValue, pressure);
+    const hSatTwb = psychEnthalpy(secondValue, wsTwb);
+    w = (hSatTwb - 1.006 * tdb) / (2501 + 1.86 * tdb);
+    steps.push(`Second property: Twb = ${formatNumber(secondValue)} deg C.`);
+    steps.push(`Assume h approximately equals saturated-air enthalpy at Twb.`);
+    steps.push(`h_sat(Twb) = ${formatNumber(hSatTwb)} kJ/kg dry air, so W = ${formatNumber(w)} kg/kg dry air.`);
+  } else {
+    throw new Error("Unsupported second psychrometric property.");
+  }
+
+  const solved = psychStateFromTdbAndW(tdb, w, pressure);
+  steps.push(`Solved RH = ${formatNumber((solved.rh || 0) * 100)}%, Twb = ${formatNumber(solved.twb)} deg C, Tdp = ${formatNumber(solved.tdp)} deg C.`);
+  steps.push(`Solved h = ${formatNumber(solved.h)} kJ/kg dry air, v = ${formatNumber(solved.v)} m^3/kg dry air.`);
+  return { point: solved, steps };
+}
+
+function psychResultItems(point) {
+  if (!point) {
+    return [];
+  }
+  return [
+    { label: "Tdb", value: point.tdb, desc: "Dry-bulb temperature", unit: "deg C" },
+    { label: "Twb", value: point.twb, desc: "Wet-bulb temperature", unit: "deg C" },
+    { label: "Tdp", value: point.tdp, desc: "Dew-point temperature", unit: "deg C" },
+    { label: "RH", value: Number.isFinite(point.rh) ? point.rh * 100 : null, desc: "Relative humidity", unit: "%" },
+    { label: "W", value: point.w, desc: "Humidity ratio", unit: "kg/kg dry air" },
+    { label: "g/kg", value: point.grainsPerKg, desc: "Moisture per kg dry air", unit: "g/kg" },
+    { label: "h", value: point.h, desc: "Specific enthalpy", unit: "kJ/kg dry air" },
+    { label: "v", value: point.v, desc: "Specific volume", unit: "m^3/kg dry air" },
+    { label: "Pw", value: point.pw, desc: "Water-vapor partial pressure", unit: "kPa" },
+    { label: "Pws", value: point.pws, desc: "Saturation pressure at Tdb", unit: "kPa" },
+  ];
+}
+
+function clearPsychResults() {
+  if (el.psychResultGrid) {
+    el.psychResultGrid.innerHTML = "";
+  }
+  if (el.psychStepsList) {
+    el.psychStepsList.innerHTML = "";
+  }
+}
+
+function renderPsychSteps(stepLines) {
+  if (!el.psychStepsList) {
+    return;
+  }
+  el.psychStepsList.innerHTML = "";
+  for (const line of stepLines) {
+    const li = document.createElement("li");
+    li.textContent = line;
+    el.psychStepsList.appendChild(li);
+  }
+}
+
+function renderPsychResults(point, steps = []) {
+  clearPsychResults();
+  for (const item of psychResultItems(point)) {
+    const card = document.createElement("article");
+    card.className = "result-card";
+    card.innerHTML = `
+      <p class="prop">${item.label}</p>
+      <p class="value">${formatWorkflowCardValue(item)}</p>
+      <p class="desc">${item.desc}</p>
+    `;
+    el.psychResultGrid.appendChild(card);
+  }
+  renderPsychSteps(steps);
+}
+
+function psychChartGeometry() {
+  const canvas = el.psychCanvas;
+  const width = canvas.width;
+  const height = canvas.height;
+  const plot = { left: 72, right: width - 22, top: 22, bottom: height - 58 };
+  const xScale = (temp) =>
+    plot.left + ((temp - PSYCH_CHART_RANGE.tMin) / (PSYCH_CHART_RANGE.tMax - PSYCH_CHART_RANGE.tMin)) * (plot.right - plot.left);
+  const yScale = (w) =>
+    plot.bottom - ((w - PSYCH_CHART_RANGE.wMin) / (PSYCH_CHART_RANGE.wMax - PSYCH_CHART_RANGE.wMin)) * (plot.bottom - plot.top);
+  const tempFromX = (x) =>
+    PSYCH_CHART_RANGE.tMin + ((x - plot.left) / (plot.right - plot.left)) * (PSYCH_CHART_RANGE.tMax - PSYCH_CHART_RANGE.tMin);
+  const wFromY = (y) =>
+    PSYCH_CHART_RANGE.wMin + ((plot.bottom - y) / (plot.bottom - plot.top)) * (PSYCH_CHART_RANGE.wMax - PSYCH_CHART_RANGE.wMin);
+  return { canvas, width, height, plot, xScale, yScale, tempFromX, wFromY };
+}
+
+function drawPsychChart() {
+  if (!el.psychCanvas) {
+    return;
+  }
+  const { canvas, width, height, plot, xScale, yScale } = psychChartGeometry();
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = "#d7dde5";
+  ctx.lineWidth = 1;
+  for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 5) {
+    const x = xScale(t);
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.stroke();
+    ctx.fillStyle = "#667085";
+    ctx.font = "11px JetBrains Mono";
+    ctx.textAlign = "center";
+    ctx.fillText(String(t), x, height - 28);
+  }
+  for (let w = PSYCH_CHART_RANGE.wMin; w <= PSYCH_CHART_RANGE.wMax + 1e-9; w += 0.002) {
+    const y = yScale(w);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#667085";
+    ctx.fillText((w * 1000).toFixed(0), plot.left - 8, y + 4);
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.clip();
+
+  const pressure = state.psych.pressure;
+
+  for (let rhPct = 10; rhPct < 100; rhPct += 10) {
+    ctx.beginPath();
+    ctx.strokeStyle = rhPct === 50 ? "#1d4ed8" : "rgba(16, 163, 127, 0.55)";
+    ctx.lineWidth = rhPct === 50 ? 1.8 : 1;
+    let started = false;
+    for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 0.25) {
+      const pws = psychSaturationPressure(t);
+      const w = psychHumidityRatioFromPartialPressure((rhPct / 100) * pws, pressure);
+      if (!Number.isFinite(w) || w < 0 || w > PSYCH_CHART_RANGE.wMax) {
+        continue;
+      }
+      const x = xScale(t);
+      const y = yScale(w);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+  }
+
+  for (let h = 10; h <= 120; h += 10) {
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.55)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    let started = false;
+    for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 0.25) {
+      const w = (h - 1.006 * t) / (2501 + 1.86 * t);
+      const ws = psychSaturationHumidityRatio(t, pressure);
+      if (!Number.isFinite(w) || w < 0 || w > Math.min(ws, PSYCH_CHART_RANGE.wMax)) {
+        continue;
+      }
+      const x = xScale(t);
+      const y = yScale(w);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.beginPath();
+  ctx.strokeStyle = "#ea580c";
+  ctx.lineWidth = 3;
+  let started = false;
+  for (let t = PSYCH_CHART_RANGE.tMin; t <= PSYCH_CHART_RANGE.tMax; t += 0.25) {
+    const w = psychSaturationHumidityRatio(t, pressure);
+    if (!Number.isFinite(w) || w > PSYCH_CHART_RANGE.wMax) {
+      continue;
+    }
+    const x = xScale(t);
+    const y = yScale(w);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+
+  if (state.psych.processPoints.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = "#7c3aed";
+    ctx.lineWidth = 2.5;
+    let startedProcess = false;
+    for (const point of state.psych.processPoints) {
+      if (!Number.isFinite(point.tdb) || !Number.isFinite(point.w)) {
+        continue;
+      }
+      const x = xScale(point.tdb);
+      const y = yScale(point.w);
+      if (!startedProcess) {
+        ctx.moveTo(x, y);
+        startedProcess = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+  }
+
+  state.psych.processPoints.forEach((point, index) => {
+    const x = xScale(point.tdb);
+    const y = yScale(point.w);
+    ctx.fillStyle = "#7c3aed";
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#4c1d95";
+    ctx.font = "12px JetBrains Mono";
+    ctx.textAlign = "left";
+    ctx.fillText(`P${index + 1}`, x + 8, y - 8);
+  });
+
+  if (state.psych.currentPoint) {
+    const point = state.psych.currentPoint;
+    const x = xScale(point.tdb);
+    const y = yScale(point.w);
+    ctx.strokeStyle = "rgba(220, 38, 38, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#dc2626";
+    ctx.beginPath();
+    ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (state.psych.hoverPoint) {
+    const point = state.psych.hoverPoint;
+    const x = xScale(point.tdb);
+    const y = yScale(point.w);
+    ctx.strokeStyle = "rgba(29, 78, 216, 0.28)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, plot.top);
+    ctx.lineTo(x, plot.bottom);
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = "#1d4ed8";
+    ctx.beginPath();
+    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  ctx.strokeStyle = "#344054";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+
+  ctx.fillStyle = "#101828";
+  ctx.font = "700 13px Space Grotesk";
+  ctx.textAlign = "center";
+  ctx.fillText("Dry-bulb Temperature, deg C", (plot.left + plot.right) / 2, height - 8);
+  ctx.save();
+  ctx.translate(20, (plot.top + plot.bottom) / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("Humidity Ratio, g/kg dry air", 0, 0);
+  ctx.restore();
+
+  ctx.fillStyle = "#ea580c";
+  ctx.font = "12px JetBrains Mono";
+  ctx.fillText("Saturation curve", plot.left + 96, plot.top + 18);
+  ctx.fillStyle = "#1d4ed8";
+  ctx.fillText("RH curves", plot.left + 270, plot.top + 18);
+  ctx.fillStyle = "#7c3aed";
+  ctx.fillText("Process path", plot.left + 388, plot.top + 18);
+}
+
+function psychCanvasPointFromEvent(event) {
+  const rect = el.psychCanvas.getBoundingClientRect();
+  const scaleX = el.psychCanvas.width / rect.width;
+  const scaleY = el.psychCanvas.height / rect.height;
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  };
+}
+
+function handlePsychCanvasClick(event) {
+  const { plot, tempFromX, wFromY } = psychChartGeometry();
+  const point = psychCanvasPointFromEvent(event);
+  if (point.x < plot.left || point.x > plot.right || point.y < plot.top || point.y > plot.bottom) {
+    return;
+  }
+  const tdb = tempFromX(point.x);
+  const w = wFromY(point.y);
+  try {
+    const solved = solvePsychrometrics({
+      tdb,
+      secondType: "w",
+      secondValue: w,
+      pressure: state.psych.pressure,
+    });
+    state.psych.currentPoint = solved.point;
+    el.psychDryBulb.value = formatNumber(solved.point.tdb);
+    el.psychSecondType.value = "w";
+    el.psychSecondValue.value = formatNumber(solved.point.w);
+    renderPsychResults(solved.point, ["Picked directly from the chart canvas."].concat(solved.steps));
+    setPsychValidationMessage("Chart point accepted.");
+    setPsychStatus("Psychrometric state read directly from the chart.", "ok");
+    drawPsychChart();
+  } catch (error) {
+    setPsychValidationMessage(error.message, "warn");
+    setPsychStatus(error.message, "warn");
+  }
+}
+
+function handlePsychCanvasMove(event) {
+  const { plot, tempFromX, wFromY } = psychChartGeometry();
+  const point = psychCanvasPointFromEvent(event);
+  if (point.x < plot.left || point.x > plot.right || point.y < plot.top || point.y > plot.bottom) {
+    return;
+  }
+
+  const tdb = tempFromX(point.x);
+  const w = wFromY(point.y);
+  try {
+    const solved = solvePsychrometrics({
+      tdb,
+      secondType: "w",
+      secondValue: w,
+      pressure: state.psych.pressure,
+    });
+    state.psych.hoverPoint = solved.point;
+    renderPsychResults(solved.point, ["Live hover preview from chart position."]);
+    setPsychValidationMessage("Hovering chart preview.");
+    setPsychStatus(
+      `Hover preview: Tdb=${formatNumber(solved.point.tdb)} deg C, RH=${formatNumber((solved.point.rh || 0) * 100)}%, W=${formatNumber(solved.point.grainsPerKg)} g/kg.`,
+      "ok",
+    );
+    drawPsychChart();
+  } catch (error) {
+    state.psych.hoverPoint = null;
+    drawPsychChart();
+  }
+}
+
+function handlePsychCanvasLeave() {
+  state.psych.hoverPoint = null;
+  if (state.psych.currentPoint) {
+    renderPsychResults(state.psych.currentPoint, ["Showing last solved or clicked state."]);
+    setPsychStatus("Hover cleared. Restored last selected psychrometric state.");
+    setPsychValidationMessage("Hover cleared.");
+  } else {
+    clearPsychResults();
+    setPsychStatus("Move over the chart to preview values, or solve from dry-bulb + one second property.");
+    setPsychValidationMessage("");
+  }
+  drawPsychChart();
+}
+
+function addCurrentPsychPointToProcess() {
+  if (!state.psych.currentPoint) {
+    setPsychValidationMessage("Solve or click a psychrometric state first.", "warn");
+    return;
+  }
+  state.psych.processPoints.push({ ...state.psych.currentPoint });
+  drawPsychChart();
+  setPsychStatus(`Added process point P${state.psych.processPoints.length}.`, "ok");
+}
+
+function clearPsychProcess() {
+  state.psych.processPoints = [];
+  drawPsychChart();
+  setPsychStatus("Psychrometric process path cleared.");
 }
 
 function clearLookupResults() {
@@ -451,6 +1063,8 @@ function wireTabs() {
       setActiveTab(button.dataset.tab);
       if (button.dataset.tab === "cycle") {
         renderCyclePlot();
+      } else if (button.dataset.tab === "psychrometric") {
+        drawPsychChart();
       }
     });
   }
@@ -840,9 +1454,15 @@ function interpolatePT(table, tInput, pInput, optionalProps = null) {
 }
 
 function interpolateTable(table, inputs, optionalProps = null) {
-  const props = optionalProps || sortedProperties(table.properties);
+  let props = optionalProps || sortedProperties(table.properties);
   if (table.mode === "PT") {
     return interpolatePT(table, inputs.T, inputs.P, props);
+  }
+
+  if (table.mode === "sat-T" && !props.includes("P")) {
+    props = ["P"].concat(props);
+  } else if (table.mode === "sat-P" && !props.includes("T")) {
+    props = ["T"].concat(props);
   }
 
   const indexKey = table.mode === "sat-T" ? "T" : "P";
@@ -1062,7 +1682,23 @@ function validateLookupInputs({ showStatus = false } = {}) {
 
 function renderLookupResults(table, results, steps, inputLabel) {
   clearLookupResults();
-  const resultKeys = sortedProperties(Object.keys(results));
+  const displayResults = { ...results };
+
+  if (table.mode === "sat-T") {
+    const input = document.getElementById("input_T");
+    const value = Number(input?.value?.trim());
+    if (Number.isFinite(value)) {
+      displayResults.T = value;
+    }
+  } else if (table.mode === "sat-P") {
+    const input = document.getElementById("input_P");
+    const value = Number(input?.value?.trim());
+    if (Number.isFinite(value)) {
+      displayResults.P = value;
+    }
+  }
+
+  const resultKeys = sortedProperties(Object.keys(displayResults));
 
   for (const key of resultKeys) {
     const meta = PROPERTY_META[key] || { symbol: key, name: key };
@@ -1070,7 +1706,7 @@ function renderLookupResults(table, results, steps, inputLabel) {
     card.className = "result-card";
     card.innerHTML = `
       <p class="prop">${meta.symbol}</p>
-      <p class="value">${formatNumber(results[key])}</p>
+      <p class="value">${formatNumber(displayResults[key])}</p>
       <p class="desc">${meta.name}</p>
     `;
     el.resultGrid.appendChild(card);
@@ -1135,9 +1771,13 @@ function renderHistoryTable() {
 
   for (const entry of state.queryHistory) {
     const row = document.createElement("tr");
-    const inputText = Object.entries(entry.inputs)
-      .map(([key, value]) => `${key}=${formatNumber(value)}`)
-      .join(", ");
+    const inputParts = Object.entries(entry.inputs).map(([key, value]) => `${key}=${formatNumber(value)}`);
+    if (entry.mode === "sat-T" && Number.isFinite(entry.results.P)) {
+      inputParts.push(`Psat=${formatNumber(entry.results.P)}`);
+    } else if (entry.mode === "sat-P" && Number.isFinite(entry.results.T)) {
+      inputParts.push(`Tsat=${formatNumber(entry.results.T)}`);
+    }
+    const inputText = inputParts.join(", ");
     row.innerHTML = `
       <td>${entry.id}</td>
       <td>${formatTimestamp(entry.timestamp)}</td>
@@ -4433,6 +5073,56 @@ function wireCycleEvents() {
   el.clearManualPointsBtn.addEventListener("click", clearManualPoints);
 }
 
+function solvePsychrometricsFromForm() {
+  const pressure = Number(el.psychPressure.value);
+  const tdb = Number(el.psychDryBulb.value);
+  const secondType = el.psychSecondType.value;
+  const secondValue = Number(el.psychSecondValue.value);
+
+  const solved = solvePsychrometrics({ tdb, secondType, secondValue, pressure });
+  state.psych.pressure = pressure;
+  state.psych.currentPoint = solved.point;
+  renderPsychResults(solved.point, solved.steps);
+  setPsychValidationMessage("Psychrometric state solved.");
+  setPsychStatus(`Solved from Tdb + ${secondType}.`, "ok");
+  drawPsychChart();
+}
+
+function wirePsychEvents() {
+  if (!el.psychForm) {
+    return;
+  }
+
+  el.psychForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    try {
+      solvePsychrometricsFromForm();
+    } catch (error) {
+      clearPsychResults();
+      setPsychValidationMessage(error.message, "error");
+      setPsychStatus(error.message, "error");
+      renderPsychSteps([error.message]);
+      drawPsychChart();
+    }
+  });
+
+  el.psychPressure.addEventListener("input", () => {
+    const pressure = Number(el.psychPressure.value);
+    if (Number.isFinite(pressure) && pressure > 0) {
+      state.psych.pressure = pressure;
+      drawPsychChart();
+    }
+  });
+
+  el.psychAddPointBtn.addEventListener("click", addCurrentPsychPointToProcess);
+  el.psychClearPointsBtn.addEventListener("click", clearPsychProcess);
+  el.psychCanvas.addEventListener("click", handlePsychCanvasClick);
+  el.psychCanvas.addEventListener("mousemove", handlePsychCanvasMove);
+  el.psychCanvas.addEventListener("mouseleave", handlePsychCanvasLeave);
+
+  drawPsychChart();
+}
+
 async function loadDataset() {
   setLookupLoading(true);
   setStatus("Loading dataset...");
@@ -4492,11 +5182,15 @@ function init() {
   wireLookupEvents();
   wireWorkflowEvents();
   wireCycleEvents();
+  wirePsychEvents();
 
   el.modeFilter.value = "all";
   el.cycleDiagramSelect.value = state.cycle.diagram;
   el.toggleDome.checked = state.cycle.domeVisible;
   el.toggleIsobars.checked = state.cycle.isobarsVisible;
+  if (el.psychPressure) {
+    el.psychPressure.value = String(state.psych.pressure);
+  }
 
   loadDataset();
 }

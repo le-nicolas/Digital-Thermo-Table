@@ -1,11 +1,8 @@
-# Digital ThermoTable
+# Digital Thermo Table
 
-ThermoLookup(just given a name) is a thermodynamic property interpolation tool for mechanical engineering students.
-
+Digital Thermo Table is a browser-based thermodynamic and psychrometric property tool for mechanical engineering students.
 
 <img width="1919" height="990" alt="image" src="https://github.com/user-attachments/assets/ee15ac62-ad32-4f9e-91ba-4e408b55da41" />
-
-
 
 ## What it does
 
@@ -14,22 +11,27 @@ ThermoLookup(just given a name) is a thermodynamic property interpolation tool f
   - Saturated tables by temperature (`sat-T`)
   - Saturated tables by pressure (`sat-P`)
   - 2D tables by temperature + pressure (`PT`)
-- Supports workflow solvers (new):
+- Automatically returns the saturation pair during saturated lookups:
+  - Input `T` also returns `Psat`
+  - Input `P` also returns `Tsat`
+- Supports workflow solvers:
   - `Phase Determination` from `T` and `P` using saturation checks
   - `Two-Phase Mixture` using quality `x` (or back-calculating `x` from a known property)
   - `Reverse Lookup` from `P + h` or `P + s` to infer `T`, phase, and quality where applicable
   - `Guided State Identification` that recommends which table family to use next
   - `Isentropic Turbine / Compressor` with reverse lookup (`P + s`) and efficiency correction
   - `Property Differences` (`Delta h`, `Delta s`, `Delta u`, `Delta v`) between two states
-- Adds sanity warnings for common mistakes (for example `x` outside `0..1`, non-physical pressure, and suspicious irreversible-process trends)
-- Cycle templates now support user-entered inputs (pressures, temperatures, efficiencies) instead of fixed hardcoded defaults
-- Cycle tab now includes a generalized unknown-variable solve mode (1-unknown/1-target or 2-unknown/2-target with DOF checks, solved iteratively)
-- Cycle unknown solver includes a live DOF status indicator and blocks solve when unknown/equation counts are inconsistent
-- Cycle panel now surfaces thermodynamic sanity-check warnings (quality bounds, sign checks on work, and non-physical trends)
+- Includes cycle plotting with configurable inputs, iterative unknown solving, and sanity-check warnings
+- Includes an interactive `Psychrometric Chart` tab:
+  - Solve moist-air states from `dry-bulb + RH`, `W`, `wet-bulb`, `dew point`, or `enthalpy`
+  - Live hover preview on the chart so values update continuously as the mouse moves
+  - Click the chart to lock a state and read all calculated properties
+  - Add multiple states to a visible psychrometric process path
+  - Keeps the provided `ASHRAE-PSYCHROMETRIC-CHART.pdf` embedded on-screen as a flashing reference panel
 - Computes interpolated properties and shows calculation steps
 - Works as a static web app
 
-## Data flow
+## Data Flow
 
 Source workbook:
 - `Themodynamic and Transport Properties.xlsm`
@@ -38,8 +40,9 @@ Build pipeline:
 1. `scripts/build_dataset.py` parses the workbook
 2. Outputs `data/thermo_tables.json`
 3. Frontend (`index.html`, `styles.css`, `app.js`) consumes JSON directly
+4. Psychrometric calculations are handled directly in the frontend and do not require the thermodynamic dataset
 
-## Quick start
+## Quick Start
 
 1. Clone:
    ```bash
@@ -57,7 +60,15 @@ Build pipeline:
 4. Open:
    - `http://localhost:8080/index.html`
 
-## Rebuild dataset (after workbook changes)
+Tabs available in the app:
+- `Property Lookup`
+- `Problem Workflows`
+- `Query History`
+- `Compare`
+- `Cycle Plotter`
+- `Psychrometric Chart`
+
+## Rebuild Dataset
 
 ```bash
 python scripts/build_dataset.py
@@ -68,15 +79,16 @@ Optional explicit paths:
 python scripts/build_dataset.py --input "Themodynamic and Transport Properties.xlsm" --output data/thermo_tables.json
 ```
 
-## Project structure
+## Project Structure
 
 ```text
-thermo-lookup/
+digital-thermo-table/
   index.html
   styles.css
   app.js
-  thermo-lookup.html
   Themodynamic and Transport Properties.xlsm
+  assets/
+    ASHRAE-PSYCHROMETRIC-CHART.pdf
   data/
     thermo_tables.json
   scripts/
@@ -84,7 +96,6 @@ thermo-lookup/
   README.md
   LICENSE
 ```
-
 
 ## License
 
