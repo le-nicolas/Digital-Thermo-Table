@@ -460,6 +460,27 @@ const PSYCH_SYSTEMS = {
     wMin: 0,
     wMax: 0.03,
     plot: { left: 47 / 993, right: 964 / 993, top: 46 / 755, bottom: 720 / 755 },
+    tempLandmarks: [
+      { value: 30, pixel: 47 },
+      { value: 40, pixel: 149 },
+      { value: 50, pixel: 251 },
+      { value: 60, pixel: 353 },
+      { value: 70, pixel: 455 },
+      { value: 80, pixel: 556 },
+      { value: 90, pixel: 658 },
+      { value: 100, pixel: 760 },
+      { value: 110, pixel: 862 },
+      { value: 120, pixel: 964 },
+    ],
+    humidityLandmarks: [
+      { value: 0.0, pixel: 720 },
+      { value: 0.005, pixel: 608 },
+      { value: 0.01, pixel: 495 },
+      { value: 0.015, pixel: 383 },
+      { value: 0.02, pixel: 271 },
+      { value: 0.025, pixel: 159 },
+      { value: 0.03, pixel: 46 },
+    ],
     tempToInternal: (value) => ((value - 32) * 5) / 9,
     tempFromInternal: (value) => (value * 9) / 5 + 32,
     pressureToInternal: (value) => value * 6.894757293168361,
@@ -502,6 +523,28 @@ const PSYCH_SYSTEMS = {
     wMin: 0,
     wMax: 0.03,
     plot: { left: 47 / 998, right: 964 / 998, top: 51 / 770, bottom: 725 / 770 },
+    tempLandmarks: [
+      { value: 0, pixel: 47 },
+      { value: 5, pixel: 139 },
+      { value: 10, pixel: 230 },
+      { value: 15, pixel: 322 },
+      { value: 20, pixel: 414 },
+      { value: 25, pixel: 506 },
+      { value: 30, pixel: 597 },
+      { value: 35, pixel: 689 },
+      { value: 40, pixel: 781 },
+      { value: 45, pixel: 872 },
+      { value: 50, pixel: 964 },
+    ],
+    humidityLandmarks: [
+      { value: 0.0, pixel: 725 },
+      { value: 0.005, pixel: 613 },
+      { value: 0.01, pixel: 500 },
+      { value: 0.015, pixel: 388 },
+      { value: 0.02, pixel: 276 },
+      { value: 0.025, pixel: 163 },
+      { value: 0.03, pixel: 51 },
+    ],
     tempToInternal: (value) => value,
     tempFromInternal: (value) => value,
     pressureToInternal: (value) => value,
@@ -843,15 +886,84 @@ function psychChartGeometry() {
     top: height * config.plot.top,
     bottom: height * config.plot.bottom,
   };
-  const xScale = (temp) =>
-    plot.left + ((temp - config.tMin) / (config.tMax - config.tMin)) * (plot.right - plot.left);
-  const yScale = (w) =>
-    plot.bottom - ((w - config.wMin) / (config.wMax - config.wMin)) * (plot.bottom - plot.top);
-  const tempFromX = (x) =>
-    config.tMin + ((x - plot.left) / (plot.right - plot.left)) * (config.tMax - config.tMin);
-  const wFromY = (y) =>
-    config.wMin + ((plot.bottom - y) / (plot.bottom - plot.top)) * (config.wMax - config.wMin);
-  return { canvas, width, height, plot, xScale, yScale, tempFromX, wFromY };
+  const tempLandmarks = (config.tempLandmarks || []).map((item) => ({
+    value: item.value,
+    pixel: (item.pixel / config.imageWidth) * width,
+  }));
+  const humidityLandmarks = (config.humidityLandmarks || []).map((item) => ({
+    value: item.value,
+    pixel: (item.pixel / config.imageHeight) * height,
+  }));
+  const xScale = (temp) => interpolatePsychAxis(tempLandmarks, temp, true);
+  const yScale = (w) => interpolatePsychAxis(humidityLandmarks, w, false);
+  const tempFromX = (x) => interpolatePsychAxisInverse(tempLandmarks, x, true);
+  const wFromY = (y) => interpolatePsychAxisInverse(humidityLandmarks, y, false);
+  const saturationY = (temp) => {
+    const tempInternal = config.tempToInternal(temp);
+    const ws = psychSaturationHumidityRatio(tempInternal, config.pressureToInternal(state.psych.pressure || config.defaultPressure));
+    return yScale(Math.min(config.wMax, Math.max(config.wMin, ws || config.wMin)));
+  };
+  return { canvas, width, height, plot, xScale, yScale, tempFromX, wFromY, saturationY };
+}
+
+function interpolatePsychAxis(landmarks, value, ascendingPixels) {
+  if (!landmarks.length) {
+    return null;
+  }
+  if (value <= landmarks[0].value) {
+    return landmarks[0].pixel;
+  }
+  for (let index = 1; index < landmarks.length; index += 1) {
+    const left = landmarks[index - 1];
+    const right = landmarks[index];
+    if (value <= right.value) {
+      const ratio = (value - left.value) / (right.value - left.value || 1);
+      return left.pixel + ratio * (right.pixel - left.pixel);
+    }
+  }
+  return landmarks[landmarks.length - 1].pixel;
+}
+
+function interpolatePsychAxisInverse(landmarks, pixel, ascendingPixels) {
+  if (!landmarks.length) {
+    return null;
+  }
+  const first = landmarks[0];
+  const last = landmarks[landmarks.length - 1];
+  const minPixel = Math.min(first.pixel, last.pixel);
+  const maxPixel = Math.max(first.pixel, last.pixel);
+  if (pixel <= minPixel) {
+    return ascendingPixels ? first.value : last.value;
+  }
+  if (pixel >= maxPixel) {
+    return ascendingPixels ? last.value : first.value;
+  }
+  for (let index = 1; index < landmarks.length; index += 1) {
+    const left = landmarks[index - 1];
+    const right = landmarks[index];
+    const lowPixel = Math.min(left.pixel, right.pixel);
+    const highPixel = Math.max(left.pixel, right.pixel);
+    if (pixel >= lowPixel && pixel <= highPixel) {
+      const ratio = (pixel - left.pixel) / (right.pixel - left.pixel || 1);
+      return left.value + ratio * (right.value - left.value);
+    }
+  }
+  return last.value;
+}
+
+function buildPsychRegionPath(geometry) {
+  const { plot, xScale, saturationY } = geometry;
+  const config = currentPsychConfig();
+  const samples = 80;
+  const path = new Path2D();
+  path.moveTo(xScale(config.tMin), plot.bottom);
+  for (let index = 0; index <= samples; index += 1) {
+    const temp = config.tMin + (index / samples) * (config.tMax - config.tMin);
+    path.lineTo(xScale(temp), saturationY(temp));
+  }
+  path.lineTo(xScale(config.tMax), plot.bottom);
+  path.closePath();
+  return path;
 }
 
 function drawPsychChart() {
@@ -863,9 +975,7 @@ function drawPsychChart() {
   ctx.clearRect(0, 0, width, height);
 
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
-  ctx.clip();
+  ctx.clip(buildPsychRegionPath(psychChartGeometry()));
 
   if (state.psych.processPoints.length > 1) {
     ctx.beginPath();
@@ -955,13 +1065,17 @@ function psychCanvasPointFromEvent(event) {
 }
 
 function handlePsychCanvasClick(event) {
-  const { plot, tempFromX, wFromY } = psychChartGeometry();
+  const geometry = psychChartGeometry();
+  const { plot, tempFromX, wFromY, saturationY } = geometry;
   const point = psychCanvasPointFromEvent(event);
   if (point.x < plot.left || point.x > plot.right || point.y < plot.top || point.y > plot.bottom) {
     return;
   }
   const config = currentPsychConfig();
   const tdb = tempFromX(point.x);
+  if (point.y < saturationY(tdb)) {
+    return;
+  }
   const w = wFromY(point.y);
   try {
     const solved = solvePsychrometrics({
@@ -987,7 +1101,8 @@ function handlePsychCanvasClick(event) {
 }
 
 function handlePsychCanvasMove(event) {
-  const { plot, tempFromX, wFromY } = psychChartGeometry();
+  const geometry = psychChartGeometry();
+  const { plot, tempFromX, wFromY, saturationY } = geometry;
   const point = psychCanvasPointFromEvent(event);
   if (point.x < plot.left || point.x > plot.right || point.y < plot.top || point.y > plot.bottom) {
     return;
@@ -995,6 +1110,11 @@ function handlePsychCanvasMove(event) {
 
   const config = currentPsychConfig();
   const tdb = tempFromX(point.x);
+  if (point.y < saturationY(tdb)) {
+    state.psych.hoverPoint = null;
+    drawPsychChart();
+    return;
+  }
   const w = wFromY(point.y);
   try {
     const solved = solvePsychrometrics({
